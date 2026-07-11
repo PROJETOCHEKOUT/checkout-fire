@@ -1,0 +1,18 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/postback/shopify/install"
+  to = "/procura.vagabundo.html"
+  status = 302
+
+[[redirects]]
+  from = "/api/postback/shopify/installapp"
+  to = "/procura.vagabundo.html"
+  status = 302
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
