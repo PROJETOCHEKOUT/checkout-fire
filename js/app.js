@@ -693,8 +693,10 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
       footerYear.innerText = new Date().getFullYear();
     }
     if (config.footerStoreName) {
-      if (footerStoreNameText) footerStoreNameText.innerText = config.footerStoreName;
+      if (footerStoreNameText) footerStoreNameText.innerText = config.footerStoreName + " | Todos os direitos reservados";
       if (footerStoreCopyright) footerStoreCopyright.innerText = config.footerStoreName;
+      const authInfoStoreName = document.getElementById('auth-info-store-name');
+      if (authInfoStoreName) authInfoStoreName.innerText = config.footerStoreName;
     }
     if (config.footerStoreCnpj) {
       if (footerStoreCnpjText) footerStoreCnpjText.innerText = `CNPJ: ${config.footerStoreCnpj}`;
