@@ -789,6 +789,16 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
 
   // Buscar configurações globais e inicializar Pixel com cache reativo local (carregamento instantâneo)
   async function initConfigsAndPixel() {
+    const globalLoader = document.getElementById('global-loader');
+    const removeLoader = () => {
+      if (globalLoader) {
+        globalLoader.style.opacity = '0';
+        setTimeout(() => { if (globalLoader) globalLoader.style.display = 'none'; }, 500);
+      }
+    };
+
+    let hasCache = false;
+
     // 1. Tentar ler do localStorage para renderização imediata da logo e estilos
     const cachedConfig = localStorage.getItem('cached_checkout_config');
     if (cachedConfig) {
@@ -796,6 +806,8 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
         const cachedData = JSON.parse(cachedConfig);
         applyConfigData(cachedData);
         calculateTotals();
+        hasCache = true;
+        removeLoader();
       } catch (e) {
         console.error('Erro ao ler configurações em cache:', e);
       }
@@ -816,6 +828,10 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
       }
     } catch (err) {
       console.error('Erro ao inicializar configurações e Pixel:', err);
+    } finally {
+      if (!hasCache) {
+        removeLoader();
+      }
     }
   }
 
