@@ -1052,6 +1052,8 @@ Fico no aguardo! \u{1F60A}`;
         if (pfApiKeyInput) pfApiKeyInput.value = pfApiKey;
         if (pfTransferKeyInput) pfTransferKeyInput.value = pfTransferKey;
         if (pfWebhookSecretInput) pfWebhookSecretInput.value = pfWebhookSecret;
+        if (wappiApiKeyInput) wappiApiKeyInput.value = waApiKey;
+        if (wappiPublicKeyInput) wappiPublicKeyInput.value = waPubKey;
 
         // Se a tabela estiver faltando, exibe aviso amigável
         if (configData.table_missing) {
