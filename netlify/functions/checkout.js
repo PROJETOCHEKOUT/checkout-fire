@@ -117,6 +117,8 @@ exports.handler = async (event, context) => {
     let PAYSHARK_SECRET_KEY = process.env.PAYSHARK_SECRET_KEY || '';
     let PAYSHARK_V2_API_KEY = process.env.PAYSHARK_V2_API_KEY || '';
     let PAGUEFLEX_API_KEY = process.env.PAGUEFLEX_API_KEY || '';
+    let WAPPI_API_KEY = process.env.WAPPI_API_KEY || '';
+    let WAPPI_PUBLIC_KEY = process.env.WAPPI_PUBLIC_KEY || '';
     let ACTIVE_GATEWAY = 'paguex';
     let THIRD_PARTY_WEBHOOK = null;
 
@@ -143,6 +145,8 @@ exports.handler = async (event, context) => {
             if (c.key === 'payshark_secret_key' && c.value) PAYSHARK_SECRET_KEY = c.value;
             if (c.key === 'payshark_v2_api_key' && c.value) PAYSHARK_V2_API_KEY = c.value;
             if (c.key === 'pagueflex_api_key' && c.value) PAGUEFLEX_API_KEY = c.value;
+            if (c.key === 'wappi_api_key' && c.value) WAPPI_API_KEY = c.value;
+            if (c.key === 'wappi_public_key' && c.value) WAPPI_PUBLIC_KEY = c.value;
             if (c.key === 'checkout_theme_config' && c.value) {
               try {
                 const tc = JSON.parse(c.value);
@@ -450,6 +454,71 @@ exports.handler = async (event, context) => {
             error_details: pagueflexErr.message,
             message: 'Fallback local PagueFlex.'
           };
+        }
+      } else if (ACTIVE_GATEWAY === 'wappi') {
+        try {
+          console.log('⚡ Iniciando integração de Pix com a Wappi...');
+          const wappiUrl = 'https://api.wappibrasil.com.br/api/v1/transactions/pix-in';
+          
+          const authHeader = 'Basic ' + Buffer.from(`${WAPPI_API_KEY}:${WAPPI_PUBLIC_KEY}`).toString('base64');
+          const amountCents = Math.round(totalAmount * 100);
+
+          const wappiPayload = {
+            amount: amountCents,
+            customer: {
+              name: data.customer_name || 'Cliente Desconhecido',
+              email: data.customer_email || 'email@desconhecido.com',
+              phone: data.customer_phone ? data.customer_phone.replace(/\D/g, '') : '11999999999',
+              document: data.customer_document ? data.customer_document.replace(/\D/g, '') : (data.customer_cpf ? data.customer_cpf.replace(/\D/g, '') : '00000000000')
+            },
+            items: data.items && data.items.length > 0 ? data.items.map(item => ({
+              title: item.title || item.name || 'Produto',
+              unitPrice: Math.round(parseFloat(item.price) * 100) || amountCents,
+              quantity: parseInt(item.quantity) || 1,
+              tangible: false
+            })) : [{
+              title: shopifyOrderName || 'Pedido Genérico',
+              unitPrice: amountCents,
+              quantity: 1,
+              tangible: false
+            }],
+            postbackUrl: "https://checkoutt-seguro.netlify.app/api/webhook",
+            ip: data.customer_ip || event.headers['client-ip'] || event.headers['x-forwarded-for'] || '127.0.0.1'
+          };
+
+          const wappiResponse = await fetch(wappiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': authHeader,
+              'User-Agent': 'CheckoutSeguro/1.0 (+contato@minhaloja.com.br)'
+            },
+            body: JSON.stringify(wappiPayload)
+          });
+
+          const wappiData = await wappiResponse.json();
+
+          if (!wappiResponse.ok || (wappiData.error && wappiData.error !== '')) {
+            throw new Error(`Erro API Wappi: ${wappiData.message || JSON.stringify(wappiData)}`);
+          }
+
+          transactionId = wappiData.id;
+          transactionStatus = 'PENDING';
+          pixQrCode = wappiData.pix.qrcode;
+          
+          const expiresAt = new Date(wappiData.pix.expiresAt);
+          pixExpiration = expiresAt.getTime() > 0 ? expiresAt.toISOString() : new Date(Date.now() + 30 * 60000).toISOString();
+          
+          gatewayResponse = wappiData;
+
+        } catch (err) {
+          console.error('❌ Exceção ao conectar com a Wappi:', err.message);
+          isMock = true;
+          transactionId = 'mock-wappi-uuid-' + Math.random().toString(36).substr(2, 9);
+          transactionStatus = 'PENDING';
+          pixQrCode = '00020101021126950014br.gov.bcb.pix0136mock-pix-key-for-wappi-testing0233Pagamento simulado wappi52040000530398654045.005802BR5915Antigravity Mock6009Sao Paulo62070503***6304E8A2';
+          pixExpiration = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          gatewayResponse = { success: false, mode: 'fallback_error', error_details: err.message, message: 'Falha ao conectar na Wappi' };
         }
       } else if (ACTIVE_GATEWAY === 'hypercash') {
         try {
@@ -841,7 +910,7 @@ exports.handler = async (event, context) => {
         mode: isMock ? 'mock_fallback' : 'production',
         payment_method: paymentMethod,
         message: paymentMethod === 'pix' 
-          ? `Transação Pix gerada via ${ACTIVE_GATEWAY === 'hypercash' ? 'HyperCash' : (ACTIVE_GATEWAY === 'payshark' ? 'PayShark' : (ACTIVE_GATEWAY === 'payshark_v2' ? 'PayShark V2' : (ACTIVE_GATEWAY === 'pagueflex' ? 'PagueFlex' : 'PagueX')))} e salva no Supabase!` 
+          ? `Transação Pix gerada via ${ACTIVE_GATEWAY === 'hypercash' ? 'HyperCash' : (ACTIVE_GATEWAY === 'payshark' ? 'PayShark' : (ACTIVE_GATEWAY === 'payshark_v2' ? 'PayShark V2' : (ACTIVE_GATEWAY === 'wappi' ? 'Wappi' : (ACTIVE_GATEWAY === 'pagueflex' ? 'PagueFlex' : 'PagueX'))))} e salva no Supabase!` 
           : 'Transação Cartão aprovada pelo Gateway e salva no Supabase!',
         pix_qr_code: pixQrCode,
         pix_expiration: pixExpiration,
@@ -932,7 +1001,7 @@ async function createShopifyOrder(data, totalAmount, paymentMethod) {
       email: data.customer_email,
       phone: cleanPhone,
       financial_status: "pending",
-      gateway: paymentMethod === 'pix' ? (ACTIVE_GATEWAY === 'hypercash' ? 'HyperCash Pix' : (ACTIVE_GATEWAY === 'payshark' ? 'PayShark Pix' : (ACTIVE_GATEWAY === 'payshark_v2' ? 'PayShark V2 Pix' : (ACTIVE_GATEWAY === 'pagueflex' ? 'PagueFlex Pix' : 'PagueX Pix')))) : 'PagueX Cartão'
+      gateway: paymentMethod === 'pix' ? (ACTIVE_GATEWAY === 'hypercash' ? 'HyperCash Pix' : (ACTIVE_GATEWAY === 'payshark' ? 'PayShark Pix' : (ACTIVE_GATEWAY === 'payshark_v2' ? 'PayShark V2 Pix' : (ACTIVE_GATEWAY === 'wappi' ? 'Wappi Pix' : (ACTIVE_GATEWAY === 'pagueflex' ? 'PagueFlex Pix' : 'PagueX Pix'))))) : 'PagueX Cartão'
     }
   };
 

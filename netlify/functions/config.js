@@ -121,6 +121,8 @@ exports.handler = async (event, context) => {
         result.pagueflex_api_key = '';
         result.pagueflex_transfer_key = '';
         result.pagueflex_webhook_secret = '';
+        result.wappi_api_key = '';
+        result.wappi_public_key = '';
       }
  
       configs.forEach(c => {
@@ -158,6 +160,8 @@ exports.handler = async (event, context) => {
           if (c.key === 'pagueflex_api_key') result.pagueflex_api_key = c.value;
           if (c.key === 'pagueflex_transfer_key') result.pagueflex_transfer_key = c.value;
           if (c.key === 'pagueflex_webhook_secret') result.pagueflex_webhook_secret = c.value;
+          if (c.key === 'wappi_api_key') result.wappi_api_key = c.value;
+          if (c.key === 'wappi_public_key') result.wappi_public_key = c.value;
         }
       });
 
@@ -203,7 +207,9 @@ exports.handler = async (event, context) => {
         payshark_v2_webhook_secret,
         pagueflex_api_key,
         pagueflex_transfer_key,
-        pagueflex_webhook_secret
+        pagueflex_webhook_secret,
+        wappi_api_key,
+        wappi_public_key
       } = data;
  
       const payloads = [];
@@ -241,6 +247,8 @@ exports.handler = async (event, context) => {
       if (pagueflex_api_key !== undefined) payloads.push({ key: 'pagueflex_api_key', value: (pagueflex_api_key || '').trim() });
       if (pagueflex_transfer_key !== undefined) payloads.push({ key: 'pagueflex_transfer_key', value: (pagueflex_transfer_key || '').trim() });
       if (pagueflex_webhook_secret !== undefined) payloads.push({ key: 'pagueflex_webhook_secret', value: (pagueflex_webhook_secret || '').trim() });
+      if (wappi_api_key !== undefined) payloads.push({ key: 'wappi_api_key', value: (wappi_api_key || '').trim() });
+      if (wappi_public_key !== undefined) payloads.push({ key: 'wappi_public_key', value: (wappi_public_key || '').trim() });
 
       // Salva ou atualiza usando upsert por Postgrest REST API
       const response = await fetch(targetUrl, {
