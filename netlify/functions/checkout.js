@@ -458,18 +458,27 @@ exports.handler = async (event, context) => {
       } else if (ACTIVE_GATEWAY === 'wappi') {
         try {
           console.log('⚡ Iniciando integração de Pix com a Wappi...');
-          const wappiUrl = 'https://api.wappibrasil.com.br/api/v1/transactions/pix-in';
+          const wappiUrl = 'https://api.wappibrasil.com.br/api/v1/transactions';
           
-          const authHeader = 'Basic ' + Buffer.from(`${WAPPI_API_KEY}:${WAPPI_PUBLIC_KEY}`).toString('base64');
+          const authHeader = 'Basic ' + Buffer.from(`${(WAPPI_API_KEY || '').trim()}:${(WAPPI_PUBLIC_KEY || '').trim()}`).toString('base64');
           const amountCents = Math.round(totalAmount * 100);
+
+          const rawIp = data.customer_ip || event.headers['client-ip'] || event.headers['x-forwarded-for'] || '127.0.0.1';
+          const cleanIp = rawIp.split(',')[0].trim();
+
+          const docNum = data.customer_document ? data.customer_document.replace(/\D/g, '') : (data.customer_cpf ? data.customer_cpf.replace(/\D/g, '') : '00000000000');
 
           const wappiPayload = {
             amount: amountCents,
+            paymentMethod: 'pix',
             customer: {
               name: data.customer_name || 'Cliente Desconhecido',
               email: data.customer_email || 'email@desconhecido.com',
               phone: data.customer_phone ? data.customer_phone.replace(/\D/g, '') : '11999999999',
-              document: data.customer_document ? data.customer_document.replace(/\D/g, '') : (data.customer_cpf ? data.customer_cpf.replace(/\D/g, '') : '00000000000')
+              document: {
+                type: docNum.length === 14 ? 'cnpj' : 'cpf',
+                number: docNum
+              }
             },
             items: data.items && data.items.length > 0 ? data.items.map(item => ({
               title: item.title || item.name || 'Produto',
@@ -482,8 +491,8 @@ exports.handler = async (event, context) => {
               quantity: 1,
               tangible: false
             }],
-            postbackUrl: "https://checkoutt-seguro.netlify.app/api/webhook",
-            ip: data.customer_ip || event.headers['client-ip'] || event.headers['x-forwarded-for'] || '127.0.0.1'
+            postbackUrl: "https://checkoutseguro-emporiodomfire.com/api/webhook",
+            ip: cleanIp
           };
 
           const wappiResponse = await fetch(wappiUrl, {
