@@ -3105,7 +3105,7 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
     }
     
     // Redireciona para a loja
-    window.location.href = 'https://nacional-brasil.store';
+    window.location.href = 'https://emporiodomfiree.com';
   });
 
   // Reiniciar Formulário

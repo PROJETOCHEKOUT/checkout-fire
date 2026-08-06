@@ -1,0 +1,5178 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API de Pagamentos",
+    "version": "1.0.0",
+    "description": "\n# Introdução\n\nAPI para processamento de pagamentos PIX, cartão, estornos e consulta de saldos.\n\n## Autenticação\n\nTodas as requisições devem usar **Basic Auth** com suas credenciais de API:\n\n```\nAuthorization: Basic base64(apiKey:publicKey)\n```\n\n- **apiKey**: Sua chave de API (prefixo `live_` para produção)\n- **publicKey**: publicKey da sua conta\n\n## User-Agent obrigatório\n\nToda requisição **deve** enviar o header `User-Agent` identificando a sua aplicação. Requisições sem `User-Agent` são rejeitadas.\n\nUse um formato que identifique nome da aplicação, versão e um canal de contato, por exemplo:\n\n```\nUser-Agent: MinhaLoja/1.0 (+contato@minhaloja.com.br)\n```\n\nIsso nos ajuda a rastrear integrações, diagnosticar incidentes e contatar o responsável em caso de incidentes ou suspeita de fraude.\n\n## Valores Monetários\n\nTodos os valores monetários são expressos em **centavos** (integer).\n\nExemplo: R$ 100,00 = `10000`\n\n## Webhooks\n\nConfigure sua URL de webhook para receber notificações em tempo real sobre mudanças de status das transações (PIX e cartão).\n\nVeja a seção **Webhooks** abaixo para detalhes sobre cada evento e exemplos de payload.\n      "
+  },
+  "servers": [
+    {
+      "url": "https://api.wappibrasil.com.br",
+      "description": "Wappi API"
+    }
+  ],
+  "tags": [
+    {
+      "name": "PIX IN",
+      "description": "Cobranças PIX (recebimentos)"
+    },
+    {
+      "name": "PIX OUT",
+      "description": "Transferências PIX (envios)"
+    },
+    {
+      "name": "Cartão",
+      "description": "Pagamentos com cartão de crédito e débito"
+    },
+    {
+      "name": "Saldo",
+      "description": "Consulta de saldos das carteiras"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Autenticação Basic usando apiKey:publicKey codificado em base64"
+      }
+    },
+    "parameters": {
+      "UserAgentHeader": {
+        "name": "User-Agent",
+        "in": "header",
+        "required": true,
+        "description": "Identificação da aplicação cliente no formato `Aplicacao/Versao (+contato)`. Obrigatório em todas as requisições.",
+        "schema": {
+          "type": "string",
+          "example": "MinhaLoja/1.0 (+contato@minhaloja.com.br)"
+        }
+      }
+    },
+    "schemas": {
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nome do cliente",
+            "example": "João Silva"
+          },
+          "document": {
+            "type": "string",
+            "description": "CPF ou CNPJ (apenas números)",
+            "example": "01234567890"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "E-mail do cliente",
+            "example": "joao@email.com"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Telefone (apenas números)",
+            "example": "11999998888"
+          }
+        },
+        "required": [
+          "name",
+          "document"
+        ]
+      },
+      "Fee": {
+        "type": "object",
+        "description": "Detalhes das taxas aplicadas",
+        "properties": {
+          "fixedAmount": {
+            "type": "integer",
+            "description": "Taxa fixa em centavos",
+            "example": 0
+          },
+          "spreadPercentage": {
+            "type": "number",
+            "format": "float",
+            "description": "Percentual de spread",
+            "example": 1.5
+          },
+          "estimatedFee": {
+            "type": "integer",
+            "description": "Taxa total estimada em centavos",
+            "example": 150
+          },
+          "netAmount": {
+            "type": "integer",
+            "description": "Valor líquido em centavos",
+            "example": 9850
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "description": "Erro de validação de campos. O campo `details` lista cada violação com `field` (caminho pontuado do campo), `code` (identificador da regra violada) e `message` (descrição amigável em pt-BR).",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Tipo do erro",
+            "example": "Validation Error"
+          },
+          "message": {
+            "type": "string",
+            "description": "Mensagem geral do erro",
+            "example": "Invalid request data"
+          },
+          "details": {
+            "type": "array",
+            "description": "Lista de erros de validação por campo",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "code",
+                "message"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "Caminho do campo com erro (dot-notation, ex.: `customer.email`)",
+                  "example": "customer.email"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "Código identificador da regra violada (ex.: `too_small`, `too_big`, `invalid_type`, `invalid_string`, `invalid_enum_value`, `custom`)",
+                  "example": "invalid_string"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Mensagem descritiva do erro",
+                  "example": "E-mail inválido"
+                }
+              }
+            },
+            "example": [
+              {
+                "field": "amount",
+                "code": "too_small",
+                "message": "Deve ser maior ou igual a 1"
+              },
+              {
+                "field": "customer.email",
+                "code": "invalid_string",
+                "message": "E-mail inválido"
+              }
+            ]
+          }
+        }
+      },
+      "BusinessError": {
+        "type": "object",
+        "description": "Erro de regra de negócio",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Tipo do erro",
+            "example": "Transaction validation failed"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "example": "validation"
+                },
+                "message": {
+                  "type": "string",
+                  "example": "Valor mínimo para PIX é R$ 1,00"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "Avisos não bloqueantes (opcional)",
+            "items": {
+              "type": "string"
+            },
+            "example": []
+          }
+        }
+      },
+      "AuthError": {
+        "type": "object",
+        "description": "Erro de autenticação",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Unauthorized"
+          },
+          "message": {
+            "type": "string",
+            "example": "Invalid API credentials"
+          }
+        }
+      },
+      "CardValidationError": {
+        "type": "object",
+        "description": "Erro de validação na criação de cobrança com cartão. O envelope contém `error: \"Validation failed\"` e a lista `details` com `field` (caminho pontuado) e `message` em inglês.",
+        "required": [
+          "error",
+          "details"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Validation failed"
+          },
+          "details": {
+            "type": "array",
+            "description": "Lista de erros de validação por campo",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "message"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "Caminho do campo com erro em dot-notation (ex.: `card.cvv`)",
+                  "example": "card.cvv"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Mensagem descritiva do erro (em inglês)",
+                  "example": "card.cvv must be 3 or 4 digits"
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFoundError": {
+        "type": "object",
+        "description": "Recurso não encontrado",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Not Found"
+          },
+          "message": {
+            "type": "string",
+            "example": "Transaction not found"
+          },
+          "code": {
+            "type": "string",
+            "example": "NOT_FOUND"
+          }
+        }
+      },
+      "InsufficientBalanceError": {
+        "type": "object",
+        "description": "Saldo insuficiente para operação",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Business Error"
+          },
+          "message": {
+            "type": "string",
+            "example": "Saldo insuficiente para realizar a transferência"
+          },
+          "code": {
+            "type": "string",
+            "example": "INSUFFICIENT_BALANCE"
+          }
+        }
+      },
+      "IdempotencyError": {
+        "type": "object",
+        "description": "Chave de idempotência já utilizada",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Conflict"
+          },
+          "message": {
+            "type": "string",
+            "example": "Idempotency key already used"
+          },
+          "code": {
+            "type": "string",
+            "example": "IDEMPOTENCY_CONFLICT"
+          }
+        }
+      },
+      "RefundRequest": {
+        "type": "object",
+        "description": "Requisição de estorno de transação PIX IN",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "description": "Valor a estornar em centavos (opcional - se não informado, estorna valor total)",
+            "minimum": 100,
+            "example": 5000
+          },
+          "reason": {
+            "type": "string",
+            "description": "Motivo do estorno (opcional)",
+            "example": "Solicitação do cliente"
+          }
+        }
+      },
+      "RefundResponse": {
+        "type": "object",
+        "description": "Resposta do estorno via PIX Reversal",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "transactionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID da transação estornada",
+            "example": "65410a1a-6db0-4e09-b200-3e669ca57348"
+          },
+          "refundAmount": {
+            "type": "integer",
+            "description": "Valor estornado em centavos",
+            "example": 5000
+          },
+          "totalRefunded": {
+            "type": "integer",
+            "description": "Total já estornado da transação em centavos",
+            "example": 5000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REFUNDED",
+              "PARTIALLY_REFUNDED"
+            ],
+            "description": "Status após o estorno",
+            "example": "REFUNDED"
+          },
+          "pixReversal": {
+            "type": "object",
+            "description": "Dados do PIX Reversal executado",
+            "properties": {
+              "endToEndId": {
+                "type": "string",
+                "description": "End-to-end ID da devolução",
+                "example": "D04838403202601231927RSLWDBG8KP8"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success",
+                  "processing"
+                ],
+                "description": "Status do PIX Reversal",
+                "example": "success"
+              },
+              "beneficiary": {
+                "type": "object",
+                "description": "Dados do beneficiário (pagador original)",
+                "properties": {
+                  "ispb": {
+                    "type": "string",
+                    "description": "ISPB do banco",
+                    "example": "18236120"
+                  },
+                  "document": {
+                    "type": "string",
+                    "description": "CPF/CNPJ do beneficiário",
+                    "example": "01234567890"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Nome do beneficiário",
+                    "example": "João Silva"
+                  },
+                  "agency": {
+                    "type": "string",
+                    "description": "Agência bancária",
+                    "example": "1"
+                  },
+                  "accountType": {
+                    "type": "integer",
+                    "description": "Tipo de conta",
+                    "example": 3
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "Número da conta",
+                    "example": "123456789"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RefundNotAvailableError": {
+        "type": "object",
+        "description": "Estorno PIX não disponível para esta transação",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Business Error"
+          },
+          "message": {
+            "type": "string",
+            "example": "PIX Reversal not available: missing acquirerId or pixEnd2EndId"
+          },
+          "code": {
+            "type": "string",
+            "example": "PIX_REVERSAL_NOT_AVAILABLE"
+          }
+        }
+      },
+      "RefundValidationError": {
+        "type": "object",
+        "description": "Erro de validação do estorno",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Business Error"
+          },
+          "message": {
+            "type": "string",
+            "example": "Only PAID transactions can be refunded"
+          },
+          "code": {
+            "type": "string",
+            "example": "INVALID_STATUS"
+          }
+        }
+      },
+      "CreatePixInRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "paymentMethod",
+          "customer",
+          "items"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "description": "Valor em centavos",
+            "minimum": 1,
+            "example": 10000
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "pix"
+            ],
+            "description": "Método de pagamento",
+            "example": "pix"
+          },
+          "customer": {
+            "type": "object",
+            "description": "ID de cliente existente OU dados completos para novo cliente",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "ID de cliente existente (se informado, demais campos são opcionais)",
+                "example": "cust_abc123"
+              },
+              "name": {
+                "type": "string",
+                "description": "Nome completo (obrigatório se não informar id)",
+                "example": "João Silva"
+              },
+              "email": {
+                "type": "string",
+                "format": "email",
+                "description": "E-mail válido (obrigatório se não informar id)",
+                "example": "joao@email.com"
+              },
+              "phone": {
+                "type": "string",
+                "pattern": "^\\d{10,11}$",
+                "description": "Telefone DDD+número 10-11 dígitos (obrigatório se não informar id)",
+                "example": "11999998888"
+              },
+              "document": {
+                "type": "object",
+                "description": "Documento (obrigatório se não informar id)",
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "pattern": "^\\d{11}$|^\\d{14}$",
+                    "description": "CPF (11 dígitos) ou CNPJ (14 dígitos)",
+                    "example": "01234567890"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cpf",
+                      "cnpj"
+                    ],
+                    "example": "cpf"
+                  }
+                }
+              },
+              "externalRef": {
+                "type": "string",
+                "description": "Referência externa do cliente"
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Lista de itens (mínimo 1)",
+            "items": {
+              "type": "object",
+              "required": [
+                "title",
+                "unitPrice",
+                "quantity",
+                "tangible"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Nome do item",
+                  "example": "Produto Digital"
+                },
+                "unitPrice": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Preço unitário em centavos",
+                  "example": 10000
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Quantidade",
+                  "example": 1
+                },
+                "tangible": {
+                  "type": "boolean",
+                  "description": "Se true, requer shipping",
+                  "example": false
+                },
+                "externalRef": {
+                  "type": "string",
+                  "description": "Referência externa do item"
+                }
+              }
+            }
+          },
+          "shipping": {
+            "type": "object",
+            "nullable": true,
+            "description": "Dados de envio. **Obrigatório** quando qualquer item possui `tangible: true`.",
+            "properties": {
+              "fee": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Taxa de frete em centavos",
+                "example": 1500
+              },
+              "address": {
+                "type": "object",
+                "description": "Endereço de entrega",
+                "properties": {
+                  "street": {
+                    "type": "string",
+                    "description": "Logradouro",
+                    "example": "Rua das Flores"
+                  },
+                  "streetNumber": {
+                    "type": "string",
+                    "description": "Número",
+                    "example": "123"
+                  },
+                  "complement": {
+                    "type": "string",
+                    "description": "Complemento (opcional)",
+                    "example": "Apto 4B"
+                  },
+                  "zipCode": {
+                    "type": "string",
+                    "pattern": "^\\d{8}$|^\\d{5}-\\d{3}$",
+                    "description": "CEP no formato 00000000 ou 00000-000",
+                    "example": "01310100"
+                  },
+                  "neighborhood": {
+                    "type": "string",
+                    "description": "Bairro",
+                    "example": "Centro"
+                  },
+                  "city": {
+                    "type": "string",
+                    "description": "Cidade",
+                    "example": "São Paulo"
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{2}$",
+                    "description": "UF (duas letras maiúsculas)",
+                    "example": "SP"
+                  },
+                  "country": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}$",
+                    "description": "Código do país ISO 3166-1 alpha-2 (duas letras minúsculas)",
+                    "example": "br"
+                  }
+                }
+              }
+            }
+          },
+          "pix": {
+            "type": "object",
+            "description": "Configurações do PIX. Informe `expiresInDays` **ou** `expiresInSeconds` (não ambos). Se ambos forem enviados, `expiresInSeconds` tem prioridade.",
+            "properties": {
+              "expiresInDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "description": "Dias para expiração (padrão: 2)",
+                "example": 2
+              },
+              "expiresInSeconds": {
+                "type": "integer",
+                "minimum": 30,
+                "maximum": 2592000,
+                "description": "Expiração em segundos contados a partir da criação. Útil para cobranças de curta duração (mínimo 30s, máximo 30 dias). Quando informado, tem prioridade sobre `expiresInDays`.",
+                "example": 600
+              }
+            }
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "Referência externa para identificação",
+            "example": "order-123"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL para receber webhooks",
+            "example": "https://seusite.com/webhook"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Dados adicionais (chave-valor)",
+            "additionalProperties": true
+          },
+          "traceable": {
+            "type": "boolean",
+            "description": "Se a transação deve ser rastreável",
+            "example": false
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv4",
+            "description": "IP do cliente"
+          }
+        }
+      },
+      "CreatePixInResponse": {
+        "type": "object",
+        "description": "Resposta da criação de cobrança PIX",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID único da transação",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "externalRef": {
+            "type": "string",
+            "nullable": true,
+            "description": "Referência externa",
+            "example": "order-123"
+          },
+          "amount": {
+            "type": "integer",
+            "description": "Valor em centavos",
+            "example": 10000
+          },
+          "refundedAmount": {
+            "type": "integer",
+            "description": "Valor já estornado (sempre 0 na criação)",
+            "example": 0
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID da empresa",
+            "example": "c1d2e3f4-a5b6-7890-cdef-123456789abc"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "pix"
+            ],
+            "example": "pix"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ],
+            "example": "pending"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL para webhooks",
+            "example": "https://seusite.com/webhook"
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "example": {
+              "orderId": "123",
+              "source": "website"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T10:30:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T10:30:00.000Z"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Sempre null na criação"
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "IP do cliente",
+            "example": "192.168.1.100"
+          },
+          "customer": {
+            "type": "object",
+            "description": "Dados do cliente",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "example": "cust_1234567890abcdef"
+              },
+              "name": {
+                "type": "string",
+                "example": "João Silva"
+              },
+              "email": {
+                "type": "string",
+                "example": "joao.silva@email.com"
+              },
+              "phone": {
+                "type": "string",
+                "example": "11999998888"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2024-01-15T10:30:00.000Z"
+              },
+              "document": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "example": "01234567890"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cpf",
+                      "cnpj"
+                    ],
+                    "example": "cpf"
+                  }
+                }
+              }
+            }
+          },
+          "card": {
+            "type": "object",
+            "nullable": true,
+            "description": "Sempre null para PIX"
+          },
+          "pix": {
+            "type": "object",
+            "description": "Dados do PIX gerado",
+            "properties": {
+              "qrcode": {
+                "type": "string",
+                "description": "Código PIX copia-e-cola (EMV)",
+                "example": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123..."
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Data de expiração do QR Code",
+                "example": "2024-01-17T10:30:00.000Z"
+              }
+            }
+          },
+          "boleto": {
+            "type": "object",
+            "nullable": true,
+            "description": "Sempre null para PIX"
+          },
+          "shipping": {
+            "type": "object",
+            "nullable": true,
+            "description": "Dados de envio (se tangible=true)"
+          },
+          "refusedReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Sempre null na criação"
+          },
+          "items": {
+            "type": "array",
+            "description": "Lista de itens da transação",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalRef": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "title": {
+                  "type": "string",
+                  "example": "Produto Digital"
+                },
+                "unitPrice": {
+                  "type": "integer",
+                  "example": 10000
+                },
+                "quantity": {
+                  "type": "integer",
+                  "example": 1
+                },
+                "tangible": {
+                  "type": "boolean",
+                  "example": false
+                }
+              }
+            }
+          },
+          "splits": {
+            "type": "array",
+            "description": "Regras de split (se configurado)",
+            "items": {
+              "type": "object"
+            }
+          },
+          "refunds": {
+            "type": "array",
+            "description": "Lista de estornos (sempre vazio na criação)",
+            "items": {
+              "type": "object"
+            }
+          },
+          "delivery": {
+            "type": "object",
+            "nullable": true
+          },
+          "fee": {
+            "type": "object",
+            "description": "Taxas calculadas",
+            "properties": {
+              "fixedAmount": {
+                "type": "integer",
+                "description": "Taxa fixa em centavos",
+                "example": 0
+              },
+              "spreadPercentage": {
+                "type": "number",
+                "description": "Percentual de spread",
+                "example": 1.5
+              },
+              "estimatedFee": {
+                "type": "integer",
+                "description": "Taxa total estimada em centavos",
+                "example": 150
+              },
+              "netAmount": {
+                "type": "integer",
+                "description": "Valor líquido em centavos",
+                "example": 9850
+              },
+              "pixInFeeType": {
+                "type": "string",
+                "enum": [
+                  "PERCENTAGE",
+                  "FIXED",
+                  "MIXED"
+                ],
+                "description": "Tipo de taxa aplicada",
+                "example": "PERCENTAGE"
+              }
+            }
+          }
+        }
+      },
+      "CreateCardRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "paymentMethod",
+          "customer",
+          "items",
+          "installments",
+          "card",
+          "ip",
+          "deviceInfo"
+        ],
+        "description": "Requisição para criação de cobrança com cartão (crédito ou débito). O envio é **PCI server-to-server**: a aplicação que chama esta API deve estar em ambiente PCI-DSS compliant (o PAN/CVV são enviados em claro no objeto `card`). `ip` e `deviceInfo` completo são obrigatórios para análise antifraude e 3DS. A captura ocorre sempre de forma imediata — não há fluxo de pré-autorização.",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "description": "Valor total em centavos",
+            "minimum": 1,
+            "example": 10000
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "BRL",
+              "USD",
+              "EUR"
+            ],
+            "description": "Moeda da cobrança. Opcional — assume `USD` quando omitido.",
+            "example": "USD"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "credit_card",
+              "debit_card"
+            ],
+            "description": "Método de pagamento com cartão",
+            "example": "credit_card"
+          },
+          "installments": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Número de parcelas (1 a 12). Para `debit_card` use sempre 1.",
+            "example": 1
+          },
+          "customer": {
+            "type": "object",
+            "description": "Dados do cliente. Envie `id` de cliente existente OU dados completos para criar novo.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "ID de cliente existente",
+                "example": "cust_abc123"
+              },
+              "name": {
+                "type": "string",
+                "description": "Nome completo como impresso no cartão",
+                "example": "João Silva"
+              },
+              "email": {
+                "type": "string",
+                "format": "email",
+                "example": "joao@email.com"
+              },
+              "phone": {
+                "type": "string",
+                "pattern": "^\\d{10,11}$",
+                "example": "11999998888"
+              },
+              "document": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "pattern": "^\\d{11}$|^\\d{14}$",
+                    "example": "01234567890"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cpf",
+                      "cnpj"
+                    ],
+                    "example": "cpf"
+                  }
+                }
+              },
+              "address": {
+                "type": "object",
+                "description": "Endereço de cobrança. Obrigatório quando algum item possui `tangible: true`.",
+                "properties": {
+                  "street": {
+                    "type": "string",
+                    "example": "Rua das Flores"
+                  },
+                  "number": {
+                    "type": "string",
+                    "example": "123"
+                  },
+                  "complement": {
+                    "type": "string",
+                    "example": "Apto 4B"
+                  },
+                  "neighborhood": {
+                    "type": "string",
+                    "example": "Centro"
+                  },
+                  "city": {
+                    "type": "string",
+                    "example": "São Paulo"
+                  },
+                  "state": {
+                    "type": "string",
+                    "example": "SP"
+                  },
+                  "postalCode": {
+                    "type": "string",
+                    "example": "01310100"
+                  },
+                  "country": {
+                    "type": "string",
+                    "example": "BR"
+                  }
+                }
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Lista de itens (mínimo 1)",
+            "items": {
+              "type": "object",
+              "required": [
+                "title",
+                "unitPrice",
+                "quantity",
+                "tangible"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "example": "Produto Digital"
+                },
+                "unitPrice": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "example": 10000
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "example": 1
+                },
+                "tangible": {
+                  "type": "boolean",
+                  "example": false
+                },
+                "externalRef": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "shipping": {
+            "type": "object",
+            "nullable": true,
+            "description": "Dados de envio. **Obrigatório** quando qualquer item possui `tangible: true`.",
+            "properties": {
+              "fee": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Taxa de frete em centavos",
+                "example": 1500
+              },
+              "address": {
+                "type": "object",
+                "description": "Endereço de entrega",
+                "properties": {
+                  "street": {
+                    "type": "string",
+                    "description": "Logradouro",
+                    "example": "Rua das Flores"
+                  },
+                  "streetNumber": {
+                    "type": "string",
+                    "description": "Número",
+                    "example": "123"
+                  },
+                  "complement": {
+                    "type": "string",
+                    "description": "Complemento (opcional)",
+                    "example": "Apto 4B"
+                  },
+                  "zipCode": {
+                    "type": "string",
+                    "pattern": "^\\d{8}$|^\\d{5}-\\d{3}$",
+                    "description": "CEP no formato 00000000 ou 00000-000",
+                    "example": "01310100"
+                  },
+                  "neighborhood": {
+                    "type": "string",
+                    "description": "Bairro",
+                    "example": "Centro"
+                  },
+                  "city": {
+                    "type": "string",
+                    "description": "Cidade",
+                    "example": "São Paulo"
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{2}$",
+                    "description": "UF (duas letras maiúsculas)",
+                    "example": "SP"
+                  },
+                  "country": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}$",
+                    "description": "Código do país ISO 3166-1 alpha-2 (duas letras minúsculas)",
+                    "example": "br"
+                  }
+                }
+              }
+            }
+          },
+          "card": {
+            "type": "object",
+            "description": "Dados brutos do cartão (PCI server-to-server). Envio requer servidor PCI-DSS compliant.",
+            "required": [
+              "number",
+              "holderName",
+              "expirationMonth",
+              "expirationYear",
+              "cvv"
+            ],
+            "properties": {
+              "number": {
+                "type": "string",
+                "description": "PAN (número completo do cartão, sem espaços)",
+                "example": "4111111111111111"
+              },
+              "holderName": {
+                "type": "string",
+                "example": "JOAO SILVA"
+              },
+              "expirationMonth": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12,
+                "example": 12
+              },
+              "expirationYear": {
+                "type": "integer",
+                "example": 2030
+              },
+              "cvv": {
+                "type": "string",
+                "example": "123"
+              }
+            }
+          },
+          "deviceInfo": {
+            "type": "object",
+            "description": "Fingerprint completo do dispositivo do pagador. Todos os campos são obrigatórios para fluxos 3DS e análise antifraude.",
+            "required": [
+              "ipAddress",
+              "userAgent",
+              "deviceId",
+              "sessionId",
+              "httpAcceptContent",
+              "browserLanguage",
+              "javaEnabled",
+              "javascriptEnabled",
+              "colorDepth",
+              "screenHeight",
+              "screenWidth",
+              "timeZoneOffset"
+            ],
+            "properties": {
+              "ipAddress": {
+                "type": "string",
+                "example": "192.168.1.100"
+              },
+              "userAgent": {
+                "type": "string",
+                "example": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+              },
+              "deviceId": {
+                "type": "string",
+                "example": "d1f4a2b7-8e9c-4a12-9f22-1c0f3e8d7b55"
+              },
+              "sessionId": {
+                "type": "string",
+                "example": "sess_2b7c9d4e5f6a8901"
+              },
+              "httpAcceptContent": {
+                "type": "string",
+                "example": "text/html,application/xhtml+xml"
+              },
+              "browserLanguage": {
+                "type": "string",
+                "example": "pt-BR"
+              },
+              "javaEnabled": {
+                "type": "boolean",
+                "example": false
+              },
+              "javascriptEnabled": {
+                "type": "boolean",
+                "example": true
+              },
+              "colorDepth": {
+                "type": "string",
+                "example": "24"
+              },
+              "screenHeight": {
+                "type": "string",
+                "example": "1080"
+              },
+              "screenWidth": {
+                "type": "string",
+                "example": "1920"
+              },
+              "timeZoneOffset": {
+                "type": "string",
+                "example": "180"
+              }
+            }
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv4",
+            "description": "IP do cliente (obrigatório)",
+            "example": "192.168.1.100"
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "Referência externa para identificação",
+            "example": "order-789"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL para receber webhooks",
+            "example": "https://seusite.com/webhook"
+          },
+          "redirectUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL de redirecionamento do navegador para fluxos hospedados (ex.: A55). Encaminhado ao adquirente como `redirect_url`, `success_redirect` e `failure_redirect`.",
+            "example": "https://seusite.com/checkout/return"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Dados adicionais (chave-valor)",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CreateCardResponse": {
+        "type": "object",
+        "description": "Resposta da criação de cobrança com cartão. Se o status for `processing` e houver `actionUrl`, redirecione o pagador para concluir o 3DS.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f23456789012"
+          },
+          "externalRef": {
+            "type": "string",
+            "nullable": true,
+            "example": "order-789"
+          },
+          "amount": {
+            "type": "integer",
+            "example": 10000
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "BRL",
+              "USD",
+              "EUR"
+            ],
+            "example": "USD"
+          },
+          "refundedAmount": {
+            "type": "integer",
+            "example": 0
+          },
+          "installments": {
+            "type": "integer",
+            "example": 3
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "c1d2e3f4-a5b6-7890-cdef-123456789abc"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "credit_card",
+              "debit_card"
+            ],
+            "example": "credit_card"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "paid",
+              "failed"
+            ],
+            "description": "`paid` = capturado; `processing` = aguardando 3DS ou pré-autorização; `failed` = recusado.",
+            "example": "paid"
+          },
+          "card": {
+            "type": "object",
+            "properties": {
+              "brand": {
+                "type": "string",
+                "description": "Bandeira do cartão",
+                "example": "visa"
+              },
+              "lastDigits": {
+                "type": "string",
+                "example": "4242"
+              },
+              "holderName": {
+                "type": "string",
+                "example": "JOAO SILVA"
+              },
+              "firstDigits": {
+                "type": "string",
+                "example": "411111"
+              },
+              "authorizationCode": {
+                "type": "string",
+                "nullable": true,
+                "example": "123456"
+              }
+            }
+          },
+          "actionUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL para redirecionamento 3DS quando `status = processing`.",
+            "example": "https://3ds.acquirer.com/challenge/abc123"
+          },
+          "refusedReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Motivo da recusa (apenas em `failed`)",
+            "example": "Insufficient funds"
+          },
+          "refusedCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "Código de recusa retornado pelo adquirente",
+            "example": "5105"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://seusite.com/webhook"
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true,
+            "example": "192.168.1.100"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/Customer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "fee": {
+            "$ref": "#/components/schemas/Fee"
+          },
+          "splits": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "refunds": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T10:30:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T10:30:02.000Z"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2024-01-15T10:30:02.000Z"
+          }
+        }
+      },
+      "GetPixInResponse": {
+        "type": "object",
+        "description": "Resposta da consulta de transação PIX IN. Valores monetários (`amount`, `refundedAmount`, `refunds[].amount`, `fee.*`) são retornados em **reais** (decimal), não em centavos.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "amount": {
+            "type": "number",
+            "format": "double",
+            "description": "Valor em reais (decimal). Ex.: R$ 100,00 = `100.0`",
+            "example": 100
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "pix_in"
+            ],
+            "example": "pix_in"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "failed",
+              "cancelled",
+              "expired",
+              "refunded",
+              "partially_refunded"
+            ],
+            "example": "paid"
+          },
+          "refundedAmount": {
+            "type": "number",
+            "format": "double",
+            "description": "Valor já estornado em reais (decimal)",
+            "example": 0
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "c1d2e3f4-a5b6-7890-cdef-123456789abc"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "pix"
+            ],
+            "example": "pix"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://seusite.com/webhook"
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true,
+            "example": "192.168.1.100"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T10:30:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T10:35:00.000Z"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2024-01-15T10:35:00.000Z"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "refundedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "customer": {
+            "type": "object",
+            "description": "Dados completos do cliente",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "example": "cust_1234567890abcdef"
+              },
+              "companyId": {
+                "type": "string",
+                "format": "uuid",
+                "example": "c1d2e3f4-a5b6-7890-cdef-123456789abc"
+              },
+              "externalRef": {
+                "type": "string",
+                "nullable": true
+              },
+              "name": {
+                "type": "string",
+                "example": "João Silva"
+              },
+              "email": {
+                "type": "string",
+                "example": "joao.silva@email.com"
+              },
+              "phone": {
+                "type": "string",
+                "example": "11999998888"
+              },
+              "birthdate": {
+                "type": "string",
+                "format": "date",
+                "nullable": true
+              },
+              "documentNumber": {
+                "type": "string",
+                "example": "01234567890"
+              },
+              "documentType": {
+                "type": "string",
+                "enum": [
+                  "CPF",
+                  "CNPJ"
+                ],
+                "example": "CPF"
+              },
+              "address": {
+                "type": "object",
+                "nullable": true
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2024-01-15T10:30:00.000Z"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2024-01-15T10:30:00.000Z"
+              }
+            }
+          },
+          "pix": {
+            "type": "object",
+            "properties": {
+              "qrcode": {
+                "type": "string",
+                "description": "Código PIX copia-e-cola (EMV)",
+                "example": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123..."
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Data de expiração do QR Code",
+                "example": "2024-01-17T10:30:00.000Z"
+              },
+              "endToEndId": {
+                "type": "string",
+                "description": "ID fim-a-fim do PIX (presente após pagamento)",
+                "example": "E12345678202401151035xyz789abc"
+              },
+              "payer": {
+                "type": "object",
+                "description": "Dados do pagador (presente apenas quando status é paid, refunded ou partially_refunded)",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Nome do pagador",
+                    "example": "Maria Santos"
+                  },
+                  "document": {
+                    "type": "string",
+                    "description": "Documento do pagador",
+                    "example": "98765432100"
+                  },
+                  "documentType": {
+                    "type": "string",
+                    "enum": [
+                      "cpf",
+                      "cnpj"
+                    ],
+                    "example": "cpf"
+                  },
+                  "branch": {
+                    "type": "string",
+                    "description": "Agência bancária",
+                    "example": "0001"
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "Número da conta",
+                    "example": "123456789"
+                  },
+                  "bankName": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Nome do banco"
+                  },
+                  "bankIspb": {
+                    "type": "string",
+                    "description": "Código ISPB do banco",
+                    "example": "00000000"
+                  }
+                }
+              }
+            }
+          },
+          "refusedReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Motivo da recusa (quando failed)"
+          },
+          "refusedCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "Código da recusa (quando failed)"
+          },
+          "refunds": {
+            "type": "array",
+            "description": "Lista de estornos realizados",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "amount": {
+                  "type": "number",
+                  "format": "double",
+                  "description": "Valor em reais (decimal)",
+                  "example": 100
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "processing",
+                    "completed",
+                    "failed"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "full",
+                    "partial"
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "merchant",
+                    "dispute",
+                    "chargeback"
+                  ]
+                },
+                "refundE2EId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "refundCode": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "originalE2EId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "refundedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "fee": {
+            "type": "object",
+            "description": "Taxas aplicadas (valores em reais, decimal)",
+            "properties": {
+              "total": {
+                "type": "number",
+                "format": "double",
+                "description": "Taxa total em reais (decimal)",
+                "example": 1.5
+              },
+              "net": {
+                "type": "number",
+                "format": "double",
+                "description": "Valor líquido em reais (decimal) — `amount - total`",
+                "example": 98.5
+              }
+            }
+          }
+        }
+      },
+      "CreatePixOutRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "pixKey",
+          "pixKeyType",
+          "destinationName",
+          "destinationDocument"
+        ],
+        "description": "Informe pixKey + pixKeyType + destinationName + destinationDocument. Header Idempotency-Key é obrigatório.",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Valor em centavos",
+            "example": 5000
+          },
+          "pixKey": {
+            "type": "string",
+            "description": "Chave PIX do destinatário",
+            "example": "joao@email.com"
+          },
+          "pixKeyType": {
+            "type": "string",
+            "enum": [
+              "CPF",
+              "CNPJ",
+              "EMAIL",
+              "PHONE",
+              "RANDOM"
+            ],
+            "description": "Tipo da chave PIX",
+            "example": "EMAIL"
+          },
+          "destinationName": {
+            "type": "string",
+            "description": "Nome do destinatário",
+            "example": "João Silva"
+          },
+          "destinationDocument": {
+            "type": "string",
+            "description": "CPF/CNPJ do destinatário",
+            "example": "01234567890"
+          },
+          "externalRef": {
+            "type": "string",
+            "description": "Referência externa",
+            "example": "withdrawal-456"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL para receber webhooks",
+            "example": "https://seusite.com/webhook"
+          },
+          "webhookSecret": {
+            "type": "string",
+            "description": "Secret para validar assinatura do webhook"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CreatePixOutResponse": {
+        "type": "object",
+        "description": "Resposta da criação de transferência PIX",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "ID da transação",
+                "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              },
+              "secureId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "ID seguro da transação",
+                "example": "b2c3d4e5-f6a7-8901-bcde-f23456789012"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "PENDING",
+                  "PROCESSING",
+                  "PENDING_APPROVAL"
+                ],
+                "description": "Status inicial (pode ser PENDING_APPROVAL se requer aprovação manual)",
+                "example": "PROCESSING"
+              },
+              "amount": {
+                "type": "integer",
+                "description": "Valor em centavos",
+                "example": 5000
+              },
+              "fee": {
+                "type": "integer",
+                "description": "Taxa em centavos",
+                "example": 100
+              },
+              "netAmount": {
+                "type": "integer",
+                "description": "Valor líquido em centavos",
+                "example": 4900
+              },
+              "pixKey": {
+                "type": "string",
+                "description": "Chave PIX do destinatário",
+                "example": "01234567890"
+              },
+              "pixKeyType": {
+                "type": "string",
+                "enum": [
+                  "CPF",
+                  "CNPJ",
+                  "EMAIL",
+                  "PHONE",
+                  "RANDOM"
+                ],
+                "example": "CPF"
+              },
+              "destinationName": {
+                "type": "string",
+                "description": "Nome do destinatário",
+                "example": "João Silva"
+              },
+              "destinationDocument": {
+                "type": "string",
+                "description": "Documento do destinatário",
+                "example": "12345678901"
+              },
+              "requiresManualApproval": {
+                "type": "boolean",
+                "description": "Se requer aprovação manual antes de processar",
+                "example": false
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2024-01-15T14:32:00.000Z"
+              }
+            }
+          }
+        }
+      },
+      "GetPixOutResponse": {
+        "type": "object",
+        "description": "Resposta da consulta de transferência PIX OUT (objeto flat, sem wrapper)",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Valor em reais (formato decimal)",
+            "example": 50
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "pix_out"
+            ],
+            "example": "pix_out"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "paid",
+              "failed",
+              "cancelled",
+              "pending_approval",
+              "approved",
+              "rejected",
+              "refunded",
+              "partially_refunded"
+            ],
+            "example": "paid"
+          },
+          "refundedAmount": {
+            "type": "number",
+            "description": "Valor já estornado em reais",
+            "example": 0
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID da empresa",
+            "example": "c1d2e3f4-a5b6-7890-cdef-123456789abc"
+          },
+          "paymentMethod": {
+            "type": "string",
+            "enum": [
+              "pix"
+            ],
+            "example": "pix"
+          },
+          "postbackUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL para webhooks",
+            "example": "https://seusite.com/webhook"
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "IP de origem da requisição",
+            "example": "192.168.1.100"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T14:21:37.488Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T14:21:42.084Z"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2024-01-15T14:21:42.082Z"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "refundedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "customer": {
+            "type": "object",
+            "nullable": true,
+            "description": "Sempre null para PIX OUT"
+          },
+          "pix": {
+            "type": "object",
+            "description": "Dados do PIX OUT",
+            "properties": {
+              "endToEndId": {
+                "type": "string",
+                "description": "ID fim-a-fim do PIX (após confirmação)",
+                "example": "E048384032024011514218ABCDEF123"
+              },
+              "destination": {
+                "type": "object",
+                "description": "Dados do destinatário",
+                "properties": {
+                  "pixKey": {
+                    "type": "string",
+                    "example": "01234567890"
+                  },
+                  "pixKeyType": {
+                    "type": "string",
+                    "enum": [
+                      "CPF",
+                      "CNPJ",
+                      "EMAIL",
+                      "PHONE",
+                      "RANDOM"
+                    ],
+                    "example": "CPF"
+                  },
+                  "name": {
+                    "type": "string",
+                    "example": "João Silva"
+                  },
+                  "document": {
+                    "type": "string",
+                    "example": "12345678901"
+                  }
+                }
+              },
+              "requiresManualApproval": {
+                "type": "boolean",
+                "example": false
+              },
+              "manuallyApprovedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "beneficiary": {
+                "type": "object",
+                "description": "Dados do beneficiário (conta que recebeu)",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Maria Santos"
+                  },
+                  "document": {
+                    "type": "string",
+                    "example": "01234567890"
+                  },
+                  "documentType": {
+                    "type": "string",
+                    "enum": [
+                      "cpf",
+                      "cnpj"
+                    ],
+                    "example": "cpf"
+                  },
+                  "branch": {
+                    "type": "string",
+                    "description": "Agência bancária",
+                    "example": "0001"
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "Número da conta",
+                    "example": "123456789"
+                  },
+                  "bankName": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Nome do banco"
+                  },
+                  "bankIspb": {
+                    "type": "string",
+                    "description": "Código ISPB do banco",
+                    "example": "18236120"
+                  }
+                }
+              }
+            }
+          },
+          "refusedReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Motivo da recusa (quando failed)"
+          },
+          "refusedCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "Código de erro (quando failed)"
+          },
+          "refunds": {
+            "type": "array",
+            "description": "Lista de estornos",
+            "items": {
+              "type": "object"
+            }
+          },
+          "fee": {
+            "type": "object",
+            "description": "Taxas aplicadas",
+            "properties": {
+              "total": {
+                "type": "number",
+                "description": "Taxa total em reais",
+                "example": 1
+              },
+              "net": {
+                "type": "number",
+                "description": "Valor líquido em reais",
+                "example": 49
+              }
+            }
+          },
+          "company": {
+            "type": "object",
+            "description": "Dados da empresa",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tenantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "merchantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "example": "Empresa Exemplo"
+              },
+              "legalName": {
+                "type": "string",
+                "example": "Empresa Exemplo LTDA"
+              },
+              "document": {
+                "type": "string",
+                "example": "12345678000190"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "INACTIVE",
+                  "SUSPENDED"
+                ],
+                "example": "ACTIVE"
+              },
+              "pixInFeePercent": {
+                "type": "number",
+                "example": 0
+              },
+              "pixInFeeFixed": {
+                "type": "number",
+                "example": 0
+              },
+              "pixOutFeePercent": {
+                "type": "number",
+                "example": 0
+              },
+              "pixOutFeeFixed": {
+                "type": "number",
+                "example": 0
+              },
+              "minimumPixAmount": {
+                "type": "number",
+                "nullable": true
+              },
+              "maximumPixAmount": {
+                "type": "number",
+                "nullable": true
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "owner": {
+            "type": "object",
+            "description": "Dados do dono/usuário",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "example": "João Silva"
+              },
+              "email": {
+                "type": "string",
+                "example": "joao@empresa.com"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "superadmin",
+                  "admin",
+                  "user"
+                ],
+                "example": "superadmin"
+              },
+              "status": {
+                "type": "string",
+                "example": "active"
+              },
+              "hasCompletedOnboarding": {
+                "type": "boolean",
+                "example": true
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "acquirer": {
+            "type": "object",
+            "nullable": true,
+            "description": "Dados do adquirente (se aplicável)"
+          },
+          "baasProvider": {
+            "type": "object",
+            "nullable": true,
+            "description": "Dados do provedor BaaS",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "example": "BluPay"
+              },
+              "slug": {
+                "type": "string",
+                "example": "blu"
+              },
+              "status": {
+                "type": "string",
+                "example": "active"
+              },
+              "minTransferAmount": {
+                "type": "number",
+                "nullable": true
+              },
+              "maxTransferAmount": {
+                "type": "number",
+                "nullable": true
+              },
+              "supportsPix24x7": {
+                "type": "boolean",
+                "example": true
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "BalanceResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "description": "Saldos das carteiras em formato string com 2 casas decimais",
+            "properties": {
+              "pix": {
+                "type": "object",
+                "description": "Carteira PIX disponível",
+                "properties": {
+                  "balance": {
+                    "type": "string",
+                    "description": "Saldo disponível (formato: string com 2 decimais)",
+                    "example": "1500.00"
+                  }
+                }
+              },
+              "pixBlocked": {
+                "type": "object",
+                "description": "Carteira PIX bloqueada (bloqueio cautelar MED)",
+                "properties": {
+                  "balance": {
+                    "type": "string",
+                    "description": "Saldo bloqueado (formato: string com 2 decimais)",
+                    "example": "0.00"
+                  }
+                }
+              },
+              "reserve": {
+                "type": "object",
+                "description": "Carteira de reserva",
+                "properties": {
+                  "balance": {
+                    "type": "string",
+                    "description": "Saldo da reserva (formato: string com 2 decimais)",
+                    "example": "50.00"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "WebhookPayload": {
+        "type": "object",
+        "description": "O webhook é enviado via POST para sua URL configurada.\n\n**Headers importantes:**\n- `x-webhook-signature`: Assinatura HMAC-SHA256 do payload (presente se webhookSecret configurado)\n- `Content-Type`: application/json\n\n**Validação da assinatura:**\n```javascript\nconst crypto = require('crypto');\nconst signature = req.headers['x-webhook-signature'];\nconst expectedSignature = crypto\n  .createHmac('sha256', webhookSecret)\n  .update(JSON.stringify(req.body))\n  .digest('hex');\nconst isValid = signature === expectedSignature;\n```",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID único do evento",
+            "example": "evt_1704384000000_abc123"
+          },
+          "type": {
+            "type": "string",
+            "description": "Tipo de objeto",
+            "example": "transaction"
+          },
+          "event": {
+            "type": "string",
+            "description": "Nome do evento",
+            "example": "transaction.paid"
+          },
+          "objectId": {
+            "type": "string",
+            "description": "ID do objeto relacionado",
+            "example": "txn_abc123"
+          },
+          "data": {
+            "type": "object",
+            "description": "Dados específicos do evento (varia por tipo de evento)"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BasicAuth": []
+    }
+  ],
+  "paths": {
+    "/api/v1/transactions": {
+      "post": {
+        "tags": [
+          "PIX IN"
+        ],
+        "summary": "Criar cobrança PIX",
+        "description": "Cria uma nova cobrança PIX (QR Code dinâmico). Após a criação, o merchant recebe notificações via webhook para cada mudança de status. Consulte a seção **Webhooks** para os payloads enviados.\n\n> Para pagamentos com cartão, use [POST /api/v1/transactions/card](#tag/cartao/POST/api/v1/transactions/card).",
+        "operationId": "createPixInTransaction",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePixInRequest"
+              },
+              "examples": {
+                "pixNewCustomer": {
+                  "summary": "PIX com novo cliente",
+                  "value": {
+                    "amount": 10000,
+                    "paymentMethod": "pix",
+                    "customer": {
+                      "name": "João Silva",
+                      "email": "joao@email.com",
+                      "phone": "11999998888",
+                      "document": {
+                        "number": "01234567890",
+                        "type": "cpf"
+                      }
+                    },
+                    "items": [
+                      {
+                        "title": "Produto Digital",
+                        "unitPrice": 10000,
+                        "quantity": 1,
+                        "tangible": false
+                      }
+                    ],
+                    "pix": {
+                      "expiresInDays": 2
+                    },
+                    "postbackUrl": "https://seusite.com/webhook"
+                  }
+                },
+                "pixExistingCustomer": {
+                  "summary": "PIX com cliente existente",
+                  "value": {
+                    "amount": 5000,
+                    "paymentMethod": "pix",
+                    "customer": {
+                      "id": "cust_abc123"
+                    },
+                    "items": [
+                      {
+                        "title": "Serviço Premium",
+                        "unitPrice": 5000,
+                        "quantity": 1,
+                        "tangible": false
+                      }
+                    ],
+                    "externalRef": "order-456"
+                  }
+                },
+                "pixWithShipping": {
+                  "summary": "PIX com campo shipping",
+                  "value": {
+                    "amount": 15000,
+                    "paymentMethod": "pix",
+                    "customer": {
+                      "name": "João Silva",
+                      "email": "joao@email.com",
+                      "phone": "11999998888",
+                      "document": {
+                        "number": "01234567890",
+                        "type": "cpf"
+                      }
+                    },
+                    "items": [
+                      {
+                        "title": "Camiseta Estampada",
+                        "unitPrice": 15000,
+                        "quantity": 1,
+                        "tangible": true
+                      }
+                    ],
+                    "shipping": {
+                      "fee": 1500,
+                      "address": {
+                        "street": "Rua das Flores",
+                        "streetNumber": "123",
+                        "complement": "Apto 4B",
+                        "zipCode": "01310100",
+                        "neighborhood": "Centro",
+                        "city": "São Paulo",
+                        "state": "SP",
+                        "country": "br"
+                      }
+                    },
+                    "pix": {
+                      "expiresInDays": 2
+                    },
+                    "postbackUrl": "https://seusite.com/webhook"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Cobrança PIX criada com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePixInResponse"
+                },
+                "example": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "externalRef": "order-123",
+                  "amount": 10000,
+                  "refundedAmount": 0,
+                  "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                  "paymentMethod": "pix",
+                  "status": "pending",
+                  "postbackUrl": "https://seusite.com/webhook",
+                  "metadata": null,
+                  "createdAt": "2024-01-15T10:30:00.000Z",
+                  "updatedAt": "2024-01-15T10:30:00.000Z",
+                  "paidAt": null,
+                  "ip": null,
+                  "customer": {
+                    "id": "cust_1234567890abcdef",
+                    "name": "João Silva",
+                    "email": "joao@email.com",
+                    "phone": "11999998888",
+                    "document": {
+                      "number": "01234567890",
+                      "type": "cpf"
+                    }
+                  },
+                  "pix": {
+                    "qrcode": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123...",
+                    "expiresAt": "2024-01-17T10:30:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Erro de validação - campos inválidos ou obrigatórios não informados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "example": {
+                  "error": "Validation Error",
+                  "message": "Invalid request data",
+                  "details": [
+                    {
+                      "field": "amount",
+                      "code": "too_small",
+                      "message": "Deve ser maior ou igual a 1"
+                    },
+                    {
+                      "field": "customer.email",
+                      "code": "invalid_string",
+                      "message": "E-mail inválido"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas ou ausentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                },
+                "example": {
+                  "error": "Unauthorized",
+                  "message": "Invalid API credentials"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de regra de negócio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessError"
+                },
+                "example": {
+                  "error": "Transaction validation failed",
+                  "details": [
+                    {
+                      "field": "validation",
+                      "message": "Valor mínimo para PIX é R$ 1,00"
+                    }
+                  ],
+                  "warnings": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transactions/card": {
+      "post": {
+        "tags": [
+          "Cartão"
+        ],
+        "summary": "Criar transação com cartão",
+        "description": "Cria um pagamento com cartão (crédito ou débito). Rota dedicada a transações com cartão — internamente equivalente a `POST /api/v1/transactions` com `paymentMethod` de cartão, apresentada separadamente para facilitar a integração com PCI server-to-server.\n\nApós a criação, o merchant recebe notificações via webhook para cada mudança de status. Consulte a seção **Webhooks** para os payloads enviados.",
+        "operationId": "createCardTransaction",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCardRequest"
+              },
+              "examples": {
+                "cardRawFields": {
+                  "summary": "Cartão (PCI server-to-server)",
+                  "value": {
+                    "amount": 15000,
+                    "paymentMethod": "credit_card",
+                    "installments": 1,
+                    "customer": {
+                      "name": "Maria Souza",
+                      "email": "maria@email.com",
+                      "phone": "11988887777",
+                      "document": {
+                        "number": "98765432100",
+                        "type": "cpf"
+                      }
+                    },
+                    "items": [
+                      {
+                        "title": "Assinatura Mensal",
+                        "unitPrice": 15000,
+                        "quantity": 1,
+                        "tangible": false
+                      }
+                    ],
+                    "card": {
+                      "number": "4111111111111111",
+                      "holderName": "MARIA SOUZA",
+                      "expirationMonth": 12,
+                      "expirationYear": 2030,
+                      "cvv": "123"
+                    },
+                    "ip": "192.168.1.100",
+                    "deviceInfo": {
+                      "ipAddress": "192.168.1.100",
+                      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                      "deviceId": "d1f4a2b7-8e9c-4a12-9f22-1c0f3e8d7b55",
+                      "sessionId": "sess_2b7c9d4e5f6a8901",
+                      "httpAcceptContent": "text/html,application/xhtml+xml",
+                      "browserLanguage": "pt-BR",
+                      "javaEnabled": false,
+                      "javascriptEnabled": true,
+                      "colorDepth": "24",
+                      "screenHeight": "1080",
+                      "screenWidth": "1920",
+                      "timeZoneOffset": "180"
+                    },
+                    "externalRef": "order-789",
+                    "postbackUrl": "https://seusite.com/webhook"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transação de cartão criada com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateCardResponse"
+                },
+                "example": {
+                  "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                  "externalRef": "order-789",
+                  "amount": 15000,
+                  "refundedAmount": 0,
+                  "installments": 1,
+                  "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                  "paymentMethod": "credit_card",
+                  "status": "paid",
+                  "card": {
+                    "brand": "visa",
+                    "lastDigits": "1111",
+                    "holderName": "MARIA SOUZA",
+                    "firstDigits": "411111",
+                    "authorizationCode": "123456"
+                  },
+                  "actionUrl": null,
+                  "refusedReason": null,
+                  "refusedCode": null,
+                  "postbackUrl": "https://seusite.com/webhook",
+                  "metadata": null,
+                  "ip": "192.168.1.100",
+                  "customer": {
+                    "id": "cust_1234567890abcdef",
+                    "name": "Maria Souza",
+                    "email": "maria@email.com",
+                    "phone": "11988887777",
+                    "document": {
+                      "number": "98765432100",
+                      "type": "cpf"
+                    }
+                  },
+                  "items": [
+                    {
+                      "title": "Assinatura Mensal",
+                      "unitPrice": 15000,
+                      "quantity": 1,
+                      "tangible": false
+                    }
+                  ],
+                  "fee": {
+                    "fixedAmount": 50,
+                    "spreadPercentage": 3.99,
+                    "estimatedFee": 649,
+                    "netAmount": 14351
+                  },
+                  "splits": [],
+                  "refunds": [],
+                  "createdAt": "2024-01-15T10:30:00.000Z",
+                  "updatedAt": "2024-01-15T10:30:02.000Z",
+                  "paidAt": "2024-01-15T10:30:02.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Erro de validação - campos inválidos ou obrigatórios não informados. Envelope: `{ error: \"Validation failed\", details: [{ field, message }] }` com mensagens em inglês.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardValidationError"
+                },
+                "examples": {
+                  "cvvMissing": {
+                    "summary": "CVV ausente em cartão raw",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "card.cvv",
+                          "message": "card.cvv is required when no card.id or card.hash"
+                        }
+                      ]
+                    }
+                  },
+                  "cvvInvalid": {
+                    "summary": "CVV com formato inválido",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "card.cvv",
+                          "message": "card.cvv must be 3 or 4 digits"
+                        }
+                      ]
+                    }
+                  },
+                  "panInvalid": {
+                    "summary": "Número de cartão inválido",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "card.number",
+                          "message": "card.number must be 13-19 digits and pass the Luhn check"
+                        }
+                      ]
+                    }
+                  },
+                  "cardExpired": {
+                    "summary": "Cartão expirado",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "card",
+                          "message": "card is expired"
+                        }
+                      ]
+                    }
+                  },
+                  "cardMissing": {
+                    "summary": "Objeto card ausente / incompleto",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "card",
+                          "message": "Provide card.id or card.hash or full card fields for credit/debit card"
+                        }
+                      ]
+                    }
+                  },
+                  "installmentsInvalid": {
+                    "summary": "Parcelas inválidas",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "installments",
+                          "message": "installments must be integer > 0 for credit_card"
+                        }
+                      ]
+                    }
+                  },
+                  "cpfInvalid": {
+                    "summary": "CPF inválido",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "customer.document.number",
+                          "message": "CPF check digits are invalid"
+                        }
+                      ]
+                    }
+                  },
+                  "cnpjInvalid": {
+                    "summary": "CNPJ inválido",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "customer.document.number",
+                          "message": "CNPJ check digits are invalid"
+                        }
+                      ]
+                    }
+                  },
+                  "redirectUrlInvalid": {
+                    "summary": "redirectUrl com formato inválido",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "redirectUrl",
+                          "message": "redirectUrl must be a valid URL"
+                        }
+                      ]
+                    }
+                  },
+                  "multipleErrors": {
+                    "summary": "Múltiplos erros agregados",
+                    "value": {
+                      "error": "Validation failed",
+                      "details": [
+                        {
+                          "field": "card.number",
+                          "message": "card.number must be 13-19 digits and pass the Luhn check"
+                        },
+                        {
+                          "field": "card.cvv",
+                          "message": "card.cvv must be 3 or 4 digits"
+                        },
+                        {
+                          "field": "customer.document.number",
+                          "message": "CPF check digits are invalid"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas ou ausentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                },
+                "example": {
+                  "error": "Unauthorized",
+                  "message": "Invalid API credentials"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de regra de negócio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessError"
+                },
+                "example": {
+                  "error": "Transaction validation failed",
+                  "details": [
+                    {
+                      "field": "validation",
+                      "message": "Valor mínimo para cartão é R$ 1,00"
+                    }
+                  ],
+                  "warnings": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transactions/pix-in": {
+      "get": {
+        "tags": [
+          "PIX IN"
+        ],
+        "summary": "Consultar cobrança PIX",
+        "description": "Retorna os detalhes e status de uma cobrança PIX.\n\n**Parâmetros de busca:**\nInforme ao menos um dos parâmetros abaixo para localizar a transação:\n- `id`: ID único da transação (UUID)\n- `externalRef`: Referência externa enviada na criação\n- `e2e`: ID fim-a-fim do PIX (End-to-End ID)\n\n**Exemplo de uso:**\n```\nGET /api/v1/transactions/pix-in?id=a1b2c3d4-e5f6-7890-abcd-ef1234567890\nGET /api/v1/transactions/pix-in?externalRef=pedido-12345\nGET /api/v1/transactions/pix-in?e2e=E12345678202401151035xyz789abc\n```",
+        "operationId": "getPixIn",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "ID da transação (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            }
+          },
+          {
+            "name": "externalRef",
+            "in": "query",
+            "required": false,
+            "description": "Referência externa da transação",
+            "schema": {
+              "type": "string",
+              "example": "pedido-12345"
+            }
+          },
+          {
+            "name": "e2e",
+            "in": "query",
+            "required": false,
+            "description": "ID fim-a-fim do PIX (End-to-End ID)",
+            "schema": {
+              "type": "string",
+              "example": "E12345678202401151035xyz789abc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalhes da cobrança",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPixInResponse"
+                },
+                "examples": {
+                  "pending": {
+                    "summary": "Cobrança pendente (aguardando pagamento)",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 100,
+                      "type": "pix_in",
+                      "status": "pending",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": "192.168.1.100",
+                      "createdAt": "2024-01-15T10:30:00.000Z",
+                      "updatedAt": "2024-01-15T10:30:00.000Z",
+                      "paidAt": null,
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": {
+                        "id": "cust_1234567890abcdef",
+                        "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                        "externalRef": null,
+                        "name": "João Silva",
+                        "email": "joao.silva@email.com",
+                        "phone": "11999998888",
+                        "birthdate": null,
+                        "documentNumber": "01234567890",
+                        "documentType": "CPF",
+                        "address": null,
+                        "createdAt": "2024-01-15T10:30:00.000Z",
+                        "updatedAt": "2024-01-15T10:30:00.000Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123def456...",
+                        "expiresAt": "2024-01-17T10:30:00.000Z",
+                        "endToEndId": null,
+                        "payer": null
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 99
+                      }
+                    }
+                  },
+                  "paid": {
+                    "summary": "Cobrança paga",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 100,
+                      "type": "pix_in",
+                      "status": "paid",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": "192.168.1.100",
+                      "createdAt": "2024-01-15T10:30:00.000Z",
+                      "updatedAt": "2024-01-15T10:35:00.000Z",
+                      "paidAt": "2024-01-15T10:35:00.000Z",
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": {
+                        "id": "cust_1234567890abcdef",
+                        "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                        "externalRef": null,
+                        "name": "João Silva",
+                        "email": "joao.silva@email.com",
+                        "phone": "11999998888",
+                        "birthdate": null,
+                        "documentNumber": "01234567890",
+                        "documentType": "CPF",
+                        "address": null,
+                        "createdAt": "2024-01-15T10:30:00.000Z",
+                        "updatedAt": "2024-01-15T10:30:00.000Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123def456...",
+                        "expiresAt": "2024-01-17T10:30:00.000Z",
+                        "endToEndId": "E12345678202401151035xyz789abc",
+                        "payer": {
+                          "name": "Maria Santos",
+                          "document": "98765432100",
+                          "documentType": "cpf",
+                          "branch": "0001",
+                          "account": "123456789",
+                          "bankName": "Banco do Brasil",
+                          "bankIspb": "00000000"
+                        }
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 99
+                      }
+                    }
+                  },
+                  "expired": {
+                    "summary": "Cobrança expirada",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 100,
+                      "type": "pix_in",
+                      "status": "expired",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": null,
+                      "createdAt": "2024-01-15T10:30:00.000Z",
+                      "updatedAt": "2024-01-17T10:30:00.000Z",
+                      "paidAt": null,
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": {
+                        "id": "cust_1234567890abcdef",
+                        "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                        "externalRef": null,
+                        "name": "João Silva",
+                        "email": "joao.silva@email.com",
+                        "phone": "11999998888",
+                        "birthdate": null,
+                        "documentNumber": "01234567890",
+                        "documentType": "CPF",
+                        "address": null,
+                        "createdAt": "2024-01-15T10:30:00.000Z",
+                        "updatedAt": "2024-01-15T10:30:00.000Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123def456...",
+                        "expiresAt": "2024-01-17T10:30:00.000Z",
+                        "endToEndId": null,
+                        "payer": null
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 99
+                      }
+                    }
+                  },
+                  "refunded": {
+                    "summary": "Cobrança estornada",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 100,
+                      "type": "pix_in",
+                      "status": "refunded",
+                      "refundedAmount": 100,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": "192.168.1.100",
+                      "createdAt": "2024-01-15T10:30:00.000Z",
+                      "updatedAt": "2024-01-16T14:00:00.000Z",
+                      "paidAt": "2024-01-15T10:35:00.000Z",
+                      "cancelledAt": null,
+                      "refundedAt": "2024-01-16T14:00:00.000Z",
+                      "customer": {
+                        "id": "cust_1234567890abcdef",
+                        "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                        "externalRef": null,
+                        "name": "João Silva",
+                        "email": "joao.silva@email.com",
+                        "phone": "11999998888",
+                        "birthdate": null,
+                        "documentNumber": "01234567890",
+                        "documentType": "CPF",
+                        "address": null,
+                        "createdAt": "2024-01-15T10:30:00.000Z",
+                        "updatedAt": "2024-01-15T10:30:00.000Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix2563qrcode.exemplo.com.br/pix/v2/abc123def456...",
+                        "expiresAt": "2024-01-17T10:30:00.000Z",
+                        "endToEndId": "E12345678202401151035xyz789abc",
+                        "payer": {
+                          "name": "Maria Santos",
+                          "document": "98765432100",
+                          "documentType": "cpf",
+                          "branch": "0001",
+                          "account": "123456789",
+                          "bankName": "Banco do Brasil",
+                          "bankIspb": "00000000"
+                        }
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [
+                        {
+                          "id": "ref_abc123def456",
+                          "amount": 100,
+                          "status": "completed",
+                          "reason": "Solicitação do cliente",
+                          "type": "full",
+                          "source": "merchant",
+                          "refundE2EId": "D12345678202401161400abc123def",
+                          "refundCode": null,
+                          "originalE2EId": "E12345678202401151035xyz789abc",
+                          "createdAt": "2024-01-16T14:00:00.000Z",
+                          "refundedAt": "2024-01-16T14:00:05.000Z"
+                        }
+                      ],
+                      "fee": {
+                        "total": 1,
+                        "net": 99
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro de busca ausente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "example": {
+                  "error": "Missing query parameter",
+                  "code": "MISSING_QUERY_PARAM",
+                  "message": "Provide at least one of: id, externalRef, e2e"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Autenticação da empresa necessária",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                },
+                "example": {
+                  "error": "Company authentication required",
+                  "code": "COMPANY_AUTH_REQUIRED"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transação não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                },
+                "example": {
+                  "error": "Transaction not found",
+                  "code": "TRANSACTION_NOT_FOUND"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transactions/pix-out": {
+      "get": {
+        "tags": [
+          "PIX OUT"
+        ],
+        "summary": "Consultar transferência PIX",
+        "description": "Retorna os detalhes e status de uma transferência PIX.\n\n**Parâmetros de busca:**\nInforme ao menos um dos parâmetros abaixo para localizar a transação:\n- `id`: ID único da transação (UUID)\n- `externalRef`: Referência externa enviada na criação\n- `idempotencyKey`: Chave de idempotência usada na criação\n- `e2e`: ID fim-a-fim do PIX (End-to-End ID)\n\n**Exemplo de uso:**\n```\nGET /api/v1/transactions/pix-out?id=a1b2c3d4-e5f6-7890-abcd-ef1234567890\nGET /api/v1/transactions/pix-out?externalRef=withdrawal-456\nGET /api/v1/transactions/pix-out?idempotencyKey=unique-key-123\nGET /api/v1/transactions/pix-out?e2e=E048384032024011514218ABCDEF123\n```",
+        "operationId": "getPixOut",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "ID da transação (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            }
+          },
+          {
+            "name": "externalRef",
+            "in": "query",
+            "required": false,
+            "description": "Referência externa da transação",
+            "schema": {
+              "type": "string",
+              "example": "withdrawal-456"
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "query",
+            "required": false,
+            "description": "Chave de idempotência usada na criação",
+            "schema": {
+              "type": "string",
+              "example": "unique-key-123"
+            }
+          },
+          {
+            "name": "e2e",
+            "in": "query",
+            "required": false,
+            "description": "ID fim-a-fim do PIX (End-to-End ID)",
+            "schema": {
+              "type": "string",
+              "example": "E048384032024011514218ABCDEF123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalhes da transferência",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPixOutResponse"
+                },
+                "examples": {
+                  "pending": {
+                    "summary": "Transferência pendente",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 50,
+                      "type": "pix_out",
+                      "status": "pending",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": null,
+                      "createdAt": "2024-01-15T14:21:37.488Z",
+                      "updatedAt": "2024-01-15T14:21:37.488Z",
+                      "paidAt": null,
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": null,
+                      "pix": {
+                        "endToEndId": null,
+                        "destination": {
+                          "pixKey": "joao@email.com",
+                          "pixKeyType": "EMAIL",
+                          "name": "João Silva",
+                          "document": "01234567890"
+                        },
+                        "requiresManualApproval": false,
+                        "manuallyApprovedAt": null,
+                        "beneficiary": null
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 49
+                      }
+                    }
+                  },
+                  "processing": {
+                    "summary": "Transferência em processamento",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 50,
+                      "type": "pix_out",
+                      "status": "processing",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": null,
+                      "createdAt": "2024-01-15T14:21:37.488Z",
+                      "updatedAt": "2024-01-15T14:21:40.000Z",
+                      "paidAt": null,
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": null,
+                      "pix": {
+                        "endToEndId": null,
+                        "destination": {
+                          "pixKey": "joao@email.com",
+                          "pixKeyType": "EMAIL",
+                          "name": "João Silva",
+                          "document": "01234567890"
+                        },
+                        "requiresManualApproval": false,
+                        "manuallyApprovedAt": null,
+                        "beneficiary": null
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 49
+                      }
+                    }
+                  },
+                  "paid": {
+                    "summary": "Transferência concluída",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 50,
+                      "type": "pix_out",
+                      "status": "paid",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": null,
+                      "createdAt": "2024-01-15T14:21:37.488Z",
+                      "updatedAt": "2024-01-15T14:21:42.084Z",
+                      "paidAt": "2024-01-15T14:21:42.082Z",
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": null,
+                      "pix": {
+                        "endToEndId": "E048384032024011514218ABCDEF123",
+                        "destination": {
+                          "pixKey": "joao@email.com",
+                          "pixKeyType": "EMAIL",
+                          "name": "João Silva",
+                          "document": "01234567890"
+                        },
+                        "requiresManualApproval": false,
+                        "manuallyApprovedAt": null,
+                        "beneficiary": {
+                          "name": "João Silva",
+                          "document": "01234567890",
+                          "documentType": "cpf",
+                          "branch": "0001",
+                          "account": "123456789",
+                          "bankName": "Nu Pagamentos S.A.",
+                          "bankIspb": "18236120"
+                        }
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 49
+                      }
+                    }
+                  },
+                  "failed": {
+                    "summary": "Transferência falhou",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 50,
+                      "type": "pix_out",
+                      "status": "failed",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": null,
+                      "createdAt": "2024-01-15T14:21:37.488Z",
+                      "updatedAt": "2024-01-15T14:21:45.000Z",
+                      "paidAt": null,
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": null,
+                      "pix": {
+                        "endToEndId": null,
+                        "destination": {
+                          "pixKey": "invalid@test.com",
+                          "pixKeyType": "EMAIL",
+                          "name": "Test User",
+                          "document": "01234567890"
+                        },
+                        "requiresManualApproval": false,
+                        "manuallyApprovedAt": null,
+                        "beneficiary": null
+                      },
+                      "refusedReason": "Chave PIX inválida ou não encontrada",
+                      "refusedCode": "PIX_KEY_NOT_FOUND",
+                      "refunds": [],
+                      "fee": {
+                        "total": 1,
+                        "net": 49
+                      }
+                    }
+                  },
+                  "pendingApproval": {
+                    "summary": "Aguardando aprovação manual",
+                    "value": {
+                      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                      "amount": 51000,
+                      "type": "pix_out",
+                      "status": "pending_approval",
+                      "refundedAmount": 0,
+                      "companyId": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+                      "paymentMethod": "pix",
+                      "postbackUrl": "https://seusite.com/webhook",
+                      "ip": null,
+                      "createdAt": "2024-01-15T14:35:00.000Z",
+                      "updatedAt": "2024-01-15T14:35:00.000Z",
+                      "paidAt": null,
+                      "cancelledAt": null,
+                      "refundedAt": null,
+                      "customer": null,
+                      "pix": {
+                        "endToEndId": null,
+                        "destination": {
+                          "pixKey": "+5511987654321",
+                          "pixKeyType": "PHONE",
+                          "name": "Maria Santos",
+                          "document": "98765432100"
+                        },
+                        "requiresManualApproval": true,
+                        "manuallyApprovedAt": null,
+                        "beneficiary": null
+                      },
+                      "refusedReason": null,
+                      "refusedCode": null,
+                      "refunds": [],
+                      "fee": {
+                        "total": 25.5,
+                        "net": 50974.5
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parâmetro de busca ausente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "example": {
+                  "error": "Missing query parameter",
+                  "code": "MISSING_QUERY_PARAM",
+                  "message": "Provide at least one of: id, externalRef, idempotencyKey, e2e"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Autenticação da empresa necessária",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                },
+                "example": {
+                  "error": "Company authentication required",
+                  "code": "COMPANY_AUTH_REQUIRED"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transação não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                },
+                "example": {
+                  "error": "Transaction not found",
+                  "code": "TRANSACTION_NOT_FOUND"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "PIX OUT"
+        ],
+        "summary": "Criar transferência PIX",
+        "description": "Cria uma nova transferência PIX para a chave informada. Requer header Idempotency-Key.",
+        "operationId": "createPixOut",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Chave única para garantir idempotência da requisição",
+            "schema": {
+              "type": "string",
+              "example": "unique-key-123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePixOutRequest"
+              },
+              "examples": {
+                "directPix": {
+                  "summary": "Transferência direta para chave PIX",
+                  "value": {
+                    "amount": 5000,
+                    "pixKey": "joao@email.com",
+                    "pixKeyType": "EMAIL",
+                    "destinationName": "João Silva",
+                    "destinationDocument": "01234567890",
+                    "externalRef": "withdrawal-456",
+                    "postbackUrl": "https://seusite.com/webhook"
+                  }
+                },
+                "randomKey": {
+                  "summary": "Transferência para chave aleatória",
+                  "value": {
+                    "amount": 2500,
+                    "pixKey": "abc123de-f456-789g-hi01-jklmnopqrst",
+                    "pixKeyType": "RANDOM",
+                    "destinationName": "Maria Santos",
+                    "destinationDocument": "98765432100"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transferência criada com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePixOutResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Erro de validação - campos inválidos ou header Idempotency-Key ausente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "examples": {
+                  "validationError": {
+                    "summary": "Campos inválidos",
+                    "value": {
+                      "error": "Validation Error",
+                      "message": "Invalid request data",
+                      "details": [
+                        {
+                          "path": "amount",
+                          "message": "amount must be a positive integer"
+                        }
+                      ]
+                    }
+                  },
+                  "missingIdempotency": {
+                    "summary": "Header Idempotency-Key ausente",
+                    "value": {
+                      "error": "Validation Error",
+                      "message": "Idempotency-Key header is required for PIX OUT operations"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflito - Idempotency key já utilizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdempotencyError"
+                },
+                "example": {
+                  "error": "Conflict",
+                  "message": "Idempotency key already used",
+                  "code": "IDEMPOTENCY_CONFLICT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de regra de negócio (saldo insuficiente, limites, etc.)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsufficientBalanceError"
+                },
+                "example": {
+                  "error": "Business Error",
+                  "message": "Insufficient wallet balance. Available: R$ 50.00, Required: R$ 100.00 + R$ 2.10 (fee)",
+                  "code": "INSUFFICIENT_BALANCE"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/balance": {
+      "get": {
+        "tags": [
+          "Saldo"
+        ],
+        "summary": "Consultar saldos",
+        "description": "Retorna os saldos de todas as carteiras da empresa.",
+        "operationId": "getBalance",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saldos das carteiras",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas ou ausentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                },
+                "example": {
+                  "error": "Unauthorized",
+                  "message": "Invalid API credentials"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transactions/{id}/refund": {
+      "delete": {
+        "tags": [
+          "PIX IN"
+        ],
+        "summary": "Estornar transação PIX IN",
+        "description": "Executa o estorno (PIX Reversal) de uma transação PIX IN.\n\n**Importante:**\n- Apenas transações PIX IN com status `PAID` podem ser estornadas\n- O estorno é executado e debita o valor da carteira PIX\n- O prazo máximo para estorno é de 180 dias após o pagamento\n- Estornos parciais são permitidos (informe o `amount` desejado)\n- Se `amount` não for informado, estorna o valor total disponível\n\n**Requisitos:**\n- A transação deve ter `acquirerId` e `pixEnd2EndId` preenchidos\n- Saldo suficiente na carteira PIX para o débito",
+        "operationId": "refundTransaction",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserAgentHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ID da transação a ser estornada",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundRequest"
+              },
+              "examples": {
+                "fullRefund": {
+                  "summary": "Estorno total",
+                  "description": "Estorna o valor total da transação",
+                  "value": {
+                    "reason": "Solicitação do cliente"
+                  }
+                },
+                "partialRefund": {
+                  "summary": "Estorno parcial",
+                  "description": "Estorna apenas parte do valor",
+                  "value": {
+                    "amount": 5000,
+                    "reason": "Devolução parcial"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estorno executado com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundResponse"
+                },
+                "example": {
+                  "success": true,
+                  "transactionId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                  "refundAmount": 10000,
+                  "totalRefunded": 10000,
+                  "status": "REFUNDED",
+                  "pixReversal": {
+                    "endToEndId": "D04838403202601231927RSLWDBG8KP8",
+                    "status": "success",
+                    "beneficiary": {
+                      "ispb": 18236120,
+                      "document": "01234567890",
+                      "name": "João Silva",
+                      "agency": "1",
+                      "accountType": 3,
+                      "account": "123456789"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Erro de validação (transação não elegível para estorno)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RefundValidationError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RefundNotAvailableError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InsufficientBalanceError"
+                    }
+                  ]
+                },
+                "examples": {
+                  "invalidStatus": {
+                    "summary": "Status inválido",
+                    "value": {
+                      "error": "Business Error",
+                      "message": "Only PAID transactions can be refunded",
+                      "code": "INVALID_STATUS"
+                    }
+                  },
+                  "notAvailable": {
+                    "summary": "PIX Reversal não disponível",
+                    "value": {
+                      "error": "Business Error",
+                      "message": "PIX Reversal not available: missing acquirerId or pixEnd2EndId",
+                      "code": "PIX_REVERSAL_NOT_AVAILABLE"
+                    }
+                  },
+                  "insufficientBalance": {
+                    "summary": "Saldo insuficiente",
+                    "value": {
+                      "error": "Business Error",
+                      "message": "Insufficient balance in PIX wallet",
+                      "code": "INSUFFICIENT_BALANCE"
+                    }
+                  },
+                  "expired": {
+                    "summary": "Prazo expirado",
+                    "value": {
+                      "error": "Business Error",
+                      "message": "Refund period expired (max 180 days after payment)",
+                      "code": "REFUND_PERIOD_EXPIRED"
+                    }
+                  },
+                  "amountExceeded": {
+                    "summary": "Valor excede disponível",
+                    "value": {
+                      "error": "Business Error",
+                      "message": "Refund amount exceeds available amount",
+                      "code": "AMOUNT_EXCEEDED"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas ou ausentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                },
+                "example": {
+                  "error": "Unauthorized",
+                  "message": "Invalid API credentials"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transação não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                },
+                "example": {
+                  "error": "Not Found",
+                  "message": "Transaction not found",
+                  "code": "NOT_FOUND"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Erro na comunicação com o acquirer/BACEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Gateway Error"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "PIX Reversal failed: acquirer communication error"
+                    },
+                    "code": {
+                      "type": "string",
+                      "example": "PIX_REVERSAL_FAILED"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "transaction.paid": {
+      "post": {
+        "summary": "Pagamento confirmado (PIX ou Cartão)",
+        "description": "Enviado quando o pagamento é confirmado. Para PIX, o saldo já foi creditado na carteira. Para cartão, a captura foi aprovada pelo adquirente.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "examples": {
+                "pix": {
+                  "summary": "PIX pago",
+                  "value": {
+                    "id": "evt_1767563732796_l1am6zgtr",
+                    "type": "transaction",
+                    "event": "transaction.paid",
+                    "objectId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                    "data": {
+                      "id": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                      "externalRef": "order-123",
+                      "status": "paid",
+                      "amount": 10000,
+                      "refundedAmount": 0,
+                      "installments": 1,
+                      "paymentMethod": "PIX",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix...",
+                        "end2EndId": "E18236120202601041430abc123",
+                        "payer": {
+                          "name": "Maria Santos",
+                          "document": "98765432100",
+                          "documentType": "cpf",
+                          "bankAccount": {
+                            "ispb": "18236120",
+                            "branch": "1",
+                            "account": "914453272"
+                          }
+                        }
+                      },
+                      "paidAt": "2026-01-04T14:30:00Z",
+                      "createdAt": "2026-01-04T14:00:00Z",
+                      "updatedAt": "2026-01-04T14:30:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                },
+                "card": {
+                  "summary": "Cartão capturado",
+                  "value": {
+                    "id": "evt_1767563732796_card001",
+                    "type": "transaction",
+                    "event": "transaction.paid",
+                    "objectId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    "data": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "externalRef": "order-789",
+                      "status": "paid",
+                      "amount": 30000,
+                      "refundedAmount": 0,
+                      "installments": 3,
+                      "paymentMethod": "CREDIT_CARD",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "card": {
+                        "brand": "visa",
+                        "lastDigits": "4242",
+                        "firstDigits": "411111"
+                      },
+                      "fee": {
+                        "fixedAmount": 50,
+                        "spreadPercentage": 3.99,
+                        "estimatedFee": 1247,
+                        "netAmount": 28753
+                      },
+                      "paidAt": "2026-01-04T14:30:02Z",
+                      "createdAt": "2026-01-04T14:30:00Z",
+                      "updatedAt": "2026-01-04T14:30:02Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.failed": {
+      "post": {
+        "summary": "Pagamento falhou (PIX ou Cartão)",
+        "description": "Enviado quando o pagamento falha. Para PIX, geralmente por timeout ou recusa pelo pagador. Para cartão, por recusa do emissor/adquirente (`refusedReason` contém o motivo).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "examples": {
+                "pix": {
+                  "summary": "PIX falhou",
+                  "value": {
+                    "id": "evt_1767563732796_ghi789",
+                    "type": "transaction",
+                    "event": "transaction.failed",
+                    "objectId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                    "data": {
+                      "id": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                      "externalRef": null,
+                      "status": "failed",
+                      "amount": 10000,
+                      "refundedAmount": 0,
+                      "installments": 1,
+                      "paymentMethod": "PIX",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix..."
+                      },
+                      "refusedReason": "Timeout - pagamento não confirmado",
+                      "createdAt": "2026-01-04T14:00:00Z",
+                      "updatedAt": "2026-01-04T15:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                },
+                "card": {
+                  "summary": "Cartão recusado",
+                  "value": {
+                    "id": "evt_1767563732796_card002",
+                    "type": "transaction",
+                    "event": "transaction.failed",
+                    "objectId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    "data": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "externalRef": "order-789",
+                      "status": "failed",
+                      "amount": 30000,
+                      "refundedAmount": 0,
+                      "installments": 3,
+                      "paymentMethod": "CREDIT_CARD",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "card": {
+                        "brand": "visa",
+                        "lastDigits": "4242",
+                        "firstDigits": "411111"
+                      },
+                      "refusedReason": "Insufficient funds",
+                      "createdAt": "2026-01-04T14:30:00Z",
+                      "updatedAt": "2026-01-04T14:30:02Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.cancelled": {
+      "post": {
+        "summary": "Cobrança PIX cancelada",
+        "description": "Enviado quando a cobrança é cancelada antes do pagamento.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767563732796_jkl012",
+                "type": "transaction",
+                "event": "transaction.cancelled",
+                "objectId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                "data": {
+                  "id": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                  "externalRef": null,
+                  "status": "cancelled",
+                  "amount": 10000,
+                  "refundedAmount": 0,
+                  "installments": 1,
+                  "paymentMethod": "PIX",
+                  "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                  "customer": {
+                    "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                    "name": "João Silva",
+                    "email": "joao@email.com",
+                    "phone": "11999999999",
+                    "document": "12345678910",
+                    "createdAt": "2026-01-04T14:00:00Z"
+                  },
+                  "pix": {
+                    "qrcode": "00020101021226850014br.gov.bcb.pix..."
+                  },
+                  "createdAt": "2026-01-04T14:00:00Z",
+                  "updatedAt": "2026-01-04T14:10:00Z",
+                  "postbackUrl": "https://seusite.com/webhook"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.expired": {
+      "post": {
+        "summary": "Cobrança PIX expirada",
+        "description": "Enviado quando o prazo para pagamento expira sem que a cobrança tenha sido paga.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767563732796_mno345",
+                "type": "transaction",
+                "event": "transaction.expired",
+                "objectId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                "data": {
+                  "id": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                  "externalRef": null,
+                  "status": "expired",
+                  "amount": 10000,
+                  "refundedAmount": 0,
+                  "installments": 1,
+                  "paymentMethod": "PIX",
+                  "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                  "customer": {
+                    "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                    "name": "João Silva",
+                    "email": "joao@email.com",
+                    "phone": "11999999999",
+                    "document": "12345678910",
+                    "createdAt": "2026-01-04T14:00:00Z"
+                  },
+                  "pix": {
+                    "qrcode": "00020101021226850014br.gov.bcb.pix...",
+                    "expiresAt": "2026-01-04T15:00:00Z"
+                  },
+                  "createdAt": "2026-01-04T14:00:00Z",
+                  "updatedAt": "2026-01-04T15:00:01Z",
+                  "postbackUrl": "https://seusite.com/webhook"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.refunded": {
+      "post": {
+        "summary": "Estorno completo (PIX ou Cartão)",
+        "description": "Enviado quando todo o valor da transação é estornado ao pagador.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "examples": {
+                "pix": {
+                  "summary": "Estorno total PIX",
+                  "value": {
+                    "id": "evt_1767563732796_pqr678",
+                    "type": "transaction",
+                    "event": "transaction.refunded",
+                    "objectId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                    "data": {
+                      "id": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                      "externalRef": "order-123",
+                      "status": "refunded",
+                      "amount": 10000,
+                      "refundedAmount": 10000,
+                      "installments": 1,
+                      "paymentMethod": "PIX",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix...",
+                        "end2EndId": "E18236120202601041430abc123",
+                        "payer": {
+                          "name": "Maria Santos",
+                          "document": "98765432100",
+                          "documentType": "cpf",
+                          "bankAccount": {
+                            "ispb": "18236120",
+                            "branch": "1",
+                            "account": "914453272"
+                          }
+                        }
+                      },
+                      "paidAt": "2026-01-04T14:30:00Z",
+                      "createdAt": "2026-01-04T14:00:00Z",
+                      "updatedAt": "2026-01-04T16:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                },
+                "card": {
+                  "summary": "Estorno total cartão",
+                  "value": {
+                    "id": "evt_1767563732796_card003",
+                    "type": "transaction",
+                    "event": "transaction.refunded",
+                    "objectId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    "data": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "externalRef": "order-789",
+                      "status": "refunded",
+                      "amount": 30000,
+                      "refundedAmount": 30000,
+                      "installments": 3,
+                      "paymentMethod": "CREDIT_CARD",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "card": {
+                        "brand": "visa",
+                        "lastDigits": "4242",
+                        "firstDigits": "411111"
+                      },
+                      "paidAt": "2026-01-04T14:30:02Z",
+                      "createdAt": "2026-01-04T14:30:00Z",
+                      "updatedAt": "2026-01-04T18:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.partially_refunded": {
+      "post": {
+        "summary": "Estorno parcial (PIX ou Cartão)",
+        "description": "Enviado quando parte do valor da transação é estornado.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "examples": {
+                "pix": {
+                  "summary": "Estorno parcial PIX",
+                  "value": {
+                    "id": "evt_1767563732796_stu901",
+                    "type": "transaction",
+                    "event": "transaction.partially_refunded",
+                    "objectId": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                    "data": {
+                      "id": "65410a1a-6db0-4e09-b200-3e669ca57348",
+                      "externalRef": "order-123",
+                      "status": "partially_refunded",
+                      "amount": 10000,
+                      "refundedAmount": 5000,
+                      "installments": 1,
+                      "paymentMethod": "PIX",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "pix": {
+                        "qrcode": "00020101021226850014br.gov.bcb.pix...",
+                        "end2EndId": "E18236120202601041430abc123",
+                        "payer": {
+                          "name": "Maria Santos",
+                          "document": "98765432100",
+                          "documentType": "cpf",
+                          "bankAccount": {
+                            "ispb": "18236120",
+                            "branch": "1",
+                            "account": "914453272"
+                          }
+                        }
+                      },
+                      "paidAt": "2026-01-04T14:30:00Z",
+                      "createdAt": "2026-01-04T14:00:00Z",
+                      "updatedAt": "2026-01-04T16:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                },
+                "card": {
+                  "summary": "Estorno parcial cartão",
+                  "value": {
+                    "id": "evt_1767563732796_card004",
+                    "type": "transaction",
+                    "event": "transaction.partially_refunded",
+                    "objectId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    "data": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "externalRef": "order-789",
+                      "status": "partially_refunded",
+                      "amount": 30000,
+                      "refundedAmount": 10000,
+                      "installments": 3,
+                      "paymentMethod": "CREDIT_CARD",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "customer": {
+                        "id": "e4408ac5-9f96-40d7-a503-9bdca4d70262",
+                        "name": "João Silva",
+                        "email": "joao@email.com",
+                        "phone": "11999999999",
+                        "document": "12345678910",
+                        "createdAt": "2026-01-04T14:00:00Z"
+                      },
+                      "card": {
+                        "brand": "visa",
+                        "lastDigits": "4242",
+                        "firstDigits": "411111"
+                      },
+                      "paidAt": "2026-01-04T14:30:02Z",
+                      "createdAt": "2026-01-04T14:30:00Z",
+                      "updatedAt": "2026-01-04T18:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.created": {
+      "post": {
+        "summary": "Transferência PIX criada",
+        "description": "Enviado quando uma nova transferência PIX é criada e está aguardando processamento.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565300000_abc123",
+                "type": "transfer",
+                "event": "transfer.created",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "externalRef": "withdrawal-456",
+                  "status": "pending",
+                  "amount": 5000,
+                  "fee": 100,
+                  "netAmount": 4900,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "requiresManualReview": false,
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T14:21:37.488Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.processing": {
+      "post": {
+        "summary": "Transferência em processamento",
+        "description": "Enviado quando a transferência está sendo processada pelo banco.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565301000_def456",
+                "type": "transfer",
+                "event": "transfer.processing",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "status": "processing",
+                  "amount": 5000,
+                  "fee": 100,
+                  "netAmount": 4900,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T14:21:38.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.paid": {
+      "post": {
+        "summary": "Transferência PIX completada",
+        "description": "Enviado quando a transferência PIX é concluída com sucesso.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565302151_abc123xyz",
+                "type": "transfer",
+                "event": "transfer.paid",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "externalRef": "withdrawal-456",
+                  "status": "paid",
+                  "amount": 5000,
+                  "fee": 100,
+                  "netAmount": 4900,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "pixEnd2EndId": "E048384032024011514218ABCDEF123",
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T14:21:42.151Z",
+                  "paidAt": "2024-01-15T14:21:42.082Z",
+                  "requiresManualReview": false,
+                  "beneficiary": {
+                    "name": "Maria Santos",
+                    "document": "01234567890",
+                    "documentType": "cpf",
+                    "bankAccount": {
+                      "ispb": "18236120",
+                      "branch": "1",
+                      "account": "123456789"
+                    }
+                  },
+                  "metadata": {
+                    "feeModel": "DEDUCT_FROM_WALLET",
+                    "directPixKey": true,
+                    "bankAccountNickname": null
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.failed": {
+      "post": {
+        "summary": "Transferência PIX falhou",
+        "description": "Enviado quando a transferência falha. O saldo é devolvido à carteira.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565303000_ghi789",
+                "type": "transfer",
+                "event": "transfer.failed",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "status": "failed",
+                  "amount": 5000,
+                  "fee": 100,
+                  "netAmount": 4900,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "refusedReason": "Chave PIX não encontrada",
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T14:21:42.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.cancelled": {
+      "post": {
+        "summary": "Transferência PIX cancelada",
+        "description": "Enviado quando a transferência é cancelada antes do processamento.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565304000_jkl012",
+                "type": "transfer",
+                "event": "transfer.cancelled",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "status": "cancelled",
+                  "amount": 5000,
+                  "fee": 100,
+                  "netAmount": 4900,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T14:22:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.pending_approval": {
+      "post": {
+        "summary": "Transferência aguardando aprovação",
+        "description": "Enviado quando a transferência requer aprovação manual (valores acima do limite).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565305000_mno345",
+                "type": "transfer",
+                "event": "transfer.pending_approval",
+                "objectId": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                "data": {
+                  "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                  "status": "pending_approval",
+                  "amount": 500000,
+                  "fee": 500,
+                  "netAmount": 499500,
+                  "paymentMethod": "PIX",
+                  "pixKey": "empresa@email.com",
+                  "pixKeyType": "EMAIL",
+                  "destinationName": "Empresa XYZ Ltda",
+                  "destinationDocument": "12345678000190",
+                  "requiresManualReview": true,
+                  "createdAt": "2024-01-15T14:32:00.000Z",
+                  "updatedAt": "2024-01-15T14:32:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.approved": {
+      "post": {
+        "summary": "Transferência aprovada manualmente",
+        "description": "Enviado quando a transferência é aprovada por um administrador.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565306000_pqr678",
+                "type": "transfer",
+                "event": "transfer.approved",
+                "objectId": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                "data": {
+                  "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                  "status": "processing",
+                  "amount": 500000,
+                  "fee": 500,
+                  "netAmount": 499500,
+                  "paymentMethod": "PIX",
+                  "pixKey": "empresa@email.com",
+                  "pixKeyType": "EMAIL",
+                  "destinationName": "Empresa XYZ Ltda",
+                  "destinationDocument": "12345678000190",
+                  "approvedBy": "admin@empresa.com",
+                  "approvedAt": "2024-01-15T14:40:00.000Z",
+                  "createdAt": "2024-01-15T14:32:00.000Z",
+                  "updatedAt": "2024-01-15T14:40:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.rejected": {
+      "post": {
+        "summary": "Transferência rejeitada manualmente",
+        "description": "Enviado quando a transferência é rejeitada por um administrador. O saldo é devolvido.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565307000_stu901",
+                "type": "transfer",
+                "event": "transfer.rejected",
+                "objectId": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                "data": {
+                  "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                  "status": "cancelled",
+                  "amount": 500000,
+                  "fee": 500,
+                  "netAmount": 499500,
+                  "paymentMethod": "PIX",
+                  "pixKey": "empresa@email.com",
+                  "pixKeyType": "EMAIL",
+                  "destinationName": "Empresa XYZ Ltda",
+                  "destinationDocument": "12345678000190",
+                  "refusedReason": "Rejeitado pelo administrador: dados suspeitos",
+                  "rejectedBy": "admin@empresa.com",
+                  "rejectedAt": "2024-01-15T14:40:00.000Z",
+                  "createdAt": "2024-01-15T14:32:00.000Z",
+                  "updatedAt": "2024-01-15T14:40:00.000Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.refunded": {
+      "post": {
+        "summary": "Devolução recebida (PIX OUT)",
+        "description": "Enviado quando o destinatário devolve o valor da transferência.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565308000_vwx234",
+                "type": "transfer",
+                "event": "transfer.refunded",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "externalRef": null,
+                  "status": "REFUNDED",
+                  "amount": 5000,
+                  "fee": 100,
+                  "netAmount": 5000,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "pixEnd2EndId": "E39929224202401151421Xium6K2N9Xx",
+                  "refundedAmount": 5000,
+                  "refundEnd2EndId": "D18236120202401151500s1406c59aa1",
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T15:00:00.000Z",
+                  "requiresManualReview": false,
+                  "beneficiary": {
+                    "name": "João Silva",
+                    "document": "12345678901",
+                    "documentType": "CPF",
+                    "bankAccount": {
+                      "bankName": "NU PAGAMENTOS - IP",
+                      "ispb": "18236120",
+                      "branch": "0001",
+                      "account": "123456789"
+                    }
+                  },
+                  "metadata": {
+                    "feeModel": "DEDUCT_FROM_WALLET",
+                    "directPixKey": true,
+                    "bankAccountNickname": null
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transfer.partially_refunded": {
+      "post": {
+        "summary": "Devolução parcial recebida",
+        "description": "Enviado quando parte do valor é devolvido pelo destinatário.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1767565309000_yza567",
+                "type": "transfer",
+                "event": "transfer.partially_refunded",
+                "objectId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "data": {
+                  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "externalRef": null,
+                  "status": "PARTIALLY_REFUNDED",
+                  "amount": 10000,
+                  "fee": 100,
+                  "netAmount": 10000,
+                  "paymentMethod": "PIX",
+                  "pixKey": "01234567890",
+                  "pixKeyType": "CPF",
+                  "destinationName": "João Silva",
+                  "destinationDocument": "12345678901",
+                  "pixEnd2EndId": "E39929224202401151421Xium6K2N9Xx",
+                  "refundedAmount": 3000,
+                  "refundEnd2EndId": "D18236120202401151500s1406c59aa1",
+                  "createdAt": "2024-01-15T14:21:37.488Z",
+                  "updatedAt": "2024-01-15T15:00:00.000Z",
+                  "requiresManualReview": false,
+                  "beneficiary": {
+                    "name": "João Silva",
+                    "document": "12345678901",
+                    "documentType": "CPF",
+                    "bankAccount": {
+                      "bankName": "NU PAGAMENTOS - IP",
+                      "ispb": "18236120",
+                      "branch": "0001",
+                      "account": "123456789"
+                    }
+                  },
+                  "metadata": {
+                    "feeModel": "DEDUCT_FROM_WALLET",
+                    "directPixKey": true,
+                    "bankAccountNickname": null
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.infraction": {
+      "post": {
+        "summary": "Infração MED (bloqueio cautelar)",
+        "description": "Enviado quando uma infração MED (Mecanismo Especial de Devolução) é reportada. Os fundos são bloqueados cautelarmente.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1704384000000_zab234",
+                "type": "transaction",
+                "event": "transaction.infraction",
+                "objectId": "txn_abc123",
+                "data": {
+                  "id": "txn_abc123",
+                  "status": "paid",
+                  "amount": 10000,
+                  "paymentMethod": "PIX",
+                  "metadata": {
+                    "infraction": {
+                      "type": "MED",
+                      "reason": "Suspeita de fraude",
+                      "reportedAt": "2026-01-04T16:00:00Z",
+                      "blockedAmount": 10000
+                    }
+                  },
+                  "createdAt": "2026-01-04T14:00:00Z",
+                  "updatedAt": "2026-01-04T16:00:00Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.protest": {
+      "post": {
+        "summary": "Protesto registrado",
+        "description": "Enviado quando um protesto é registrado contra a transação.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1704384000000_cde567",
+                "type": "transaction",
+                "event": "transaction.protest",
+                "objectId": "txn_abc123",
+                "data": {
+                  "id": "txn_abc123",
+                  "status": "paid",
+                  "amount": 10000,
+                  "paymentMethod": "PIX",
+                  "metadata": {
+                    "protest": {
+                      "reason": "Produto não entregue",
+                      "protestAt": "2026-01-05T10:00:00Z"
+                    }
+                  },
+                  "createdAt": "2026-01-04T14:00:00Z",
+                  "updatedAt": "2026-01-05T10:00:00Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.blocked": {
+      "post": {
+        "summary": "Fundos bloqueados",
+        "description": "Enviado quando os fundos da transação são bloqueados por ordem judicial ou compliance.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "example": {
+                "id": "evt_1704384000000_fgh890",
+                "type": "transaction",
+                "event": "transaction.blocked",
+                "objectId": "txn_abc123",
+                "data": {
+                  "id": "txn_abc123",
+                  "status": "paid",
+                  "amount": 10000,
+                  "paymentMethod": "PIX",
+                  "metadata": {
+                    "block": {
+                      "reason": "Ordem judicial",
+                      "blockedAt": "2026-01-05T15:00:00Z",
+                      "blockedAmount": 10000
+                    }
+                  },
+                  "createdAt": "2026-01-04T14:00:00Z",
+                  "updatedAt": "2026-01-05T15:00:00Z"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.chargeback": {
+      "post": {
+        "summary": "Chargeback aplicado (PIX ou Cartão)",
+        "description": "Enviado quando um chargeback é aplicado à transação e o valor é estornado. Em cartão, o adquirente sinaliza o chargeback via webhook (ex.: A55 `chargeback_requested`).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "examples": {
+                "pix": {
+                  "summary": "Chargeback PIX",
+                  "value": {
+                    "id": "evt_1704384000000_ijk123",
+                    "type": "transaction",
+                    "event": "transaction.chargeback",
+                    "objectId": "txn_abc123",
+                    "data": {
+                      "id": "txn_abc123",
+                      "status": "refunded",
+                      "amount": 10000,
+                      "refundedAmount": 10000,
+                      "paymentMethod": "PIX",
+                      "metadata": {
+                        "chargeback": {
+                          "reason": "Transação não reconhecida",
+                          "chargebackAt": "2026-01-05T10:00:00Z"
+                        }
+                      },
+                      "createdAt": "2026-01-04T14:00:00Z",
+                      "updatedAt": "2026-01-05T10:00:00Z"
+                    }
+                  }
+                },
+                "card": {
+                  "summary": "Chargeback cartão",
+                  "value": {
+                    "id": "evt_1704384000000_card005",
+                    "type": "transaction",
+                    "event": "transaction.chargeback",
+                    "objectId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    "data": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "externalRef": "order-789",
+                      "status": "refunded",
+                      "amount": 30000,
+                      "refundedAmount": 30000,
+                      "installments": 3,
+                      "paymentMethod": "CREDIT_CARD",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "card": {
+                        "brand": "visa",
+                        "lastDigits": "4242",
+                        "firstDigits": "411111"
+                      },
+                      "metadata": {
+                        "chargeback": {
+                          "reason": "Transação não reconhecida",
+                          "chargebackAt": "2026-01-10T10:00:00Z"
+                        }
+                      },
+                      "paidAt": "2026-01-04T14:30:02Z",
+                      "createdAt": "2026-01-04T14:30:00Z",
+                      "updatedAt": "2026-01-10T10:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    },
+    "transaction.dispute": {
+      "post": {
+        "summary": "Disputa aberta (PIX ou Cartão)",
+        "description": "Enviado quando uma disputa é aberta pelo pagador questionando a transação. Em cartão, representa um pré-chargeback dentro do prazo de contestação.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              },
+              "examples": {
+                "pix": {
+                  "summary": "Disputa PIX",
+                  "value": {
+                    "id": "evt_1704384000000_lmn456",
+                    "type": "transaction",
+                    "event": "transaction.dispute",
+                    "objectId": "txn_abc123",
+                    "data": {
+                      "id": "txn_abc123",
+                      "status": "paid",
+                      "amount": 10000,
+                      "paymentMethod": "PIX",
+                      "metadata": {
+                        "dispute": {
+                          "reason": "Valor incorreto cobrado",
+                          "disputeAt": "2026-01-05T11:00:00Z",
+                          "deadline": "2026-01-12T11:00:00Z"
+                        }
+                      },
+                      "createdAt": "2026-01-04T14:00:00Z",
+                      "updatedAt": "2026-01-05T11:00:00Z"
+                    }
+                  }
+                },
+                "card": {
+                  "summary": "Disputa cartão",
+                  "value": {
+                    "id": "evt_1704384000000_card006",
+                    "type": "transaction",
+                    "event": "transaction.dispute",
+                    "objectId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    "data": {
+                      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                      "externalRef": "order-789",
+                      "status": "paid",
+                      "amount": 30000,
+                      "refundedAmount": 0,
+                      "installments": 3,
+                      "paymentMethod": "CREDIT_CARD",
+                      "companyId": "088b388c-2a5b-4cb8-8fd9-944bf316d37b",
+                      "card": {
+                        "brand": "visa",
+                        "lastDigits": "4242",
+                        "firstDigits": "411111"
+                      },
+                      "metadata": {
+                        "dispute": {
+                          "reason": "Produto não recebido",
+                          "disputeAt": "2026-01-08T11:00:00Z",
+                          "deadline": "2026-01-22T11:00:00Z"
+                        }
+                      },
+                      "paidAt": "2026-01-04T14:30:02Z",
+                      "createdAt": "2026-01-04T14:30:00Z",
+                      "updatedAt": "2026-01-08T11:00:00Z",
+                      "postbackUrl": "https://seusite.com/webhook"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processado com sucesso"
+          }
+        }
+      }
+    }
+  }
+}

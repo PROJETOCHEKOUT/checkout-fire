@@ -1,0 +1,47 @@
+﻿HTTP/1.1 302 Found
+Connection: Keep-Alive
+Keep-Alive: timeout=5, max=100
+X-Powered-By: PHP/8.3.30
+Expires: Wed, 11 Jan 1984 05:00:00 GMT
+X-Redirect-By: WordPress
+Location: https://nacional-brasil.store/cart/
+X-LiteSpeed-Cache-Control: no-cache
+Cache-Control: no-cache, no-store, must-revalidate, max-age=0         
+set-cookie: woocommerce_cart_hash=dc4cfbffc4096241eb6f69fbdb9639ee; path=/; secure
+Content-Type: text/html; charset=UTF-8
+Date: Thu, 11 Jun 2026 20:00:41 GMT
+Server: LiteSpeed
+platform: hostinger
+panel: hpanel
+Content-Security-Policy: upgrade-insecure-requests
+alt-svc: h3=":443"; ma=2592000, h3-29=":443"; ma=2592000, h3-Q050=":443"; ma=2592000, h3-Q046=":443"; ma=2592000, h3-Q043=":443"; ma=2592000, quic=":443"; ma=2592000; v="43,46"
+
+HTTP/1.1 302 Found
+Connection: Keep-Alive
+Keep-Alive: timeout=5, max=100
+X-Powered-By: PHP/8.3.30
+Content-Type: text/html; charset=UTF-8
+Expires: Wed, 11 Jan 1984 05:00:00 GMT
+X-Redirect-By: WordPress
+Location: https://checkoutt-seguro.netlify.app/?cart=%5B%7B%22title%22%3A%22Travesseiro+Cervical+Tomi%2C+sono+confort%5Cu00e1vel%2C+espuma+de+mem%5Cu00f3ria+ergon%5Cu00f4mica%22%2C%22price%22%3A%2297.90%22%2C%22sku%22%3A%22simple-travesseiro-cervical-tomimi-sono-confortavel-espuma-de-memoria-ergonomica-sem-odor-travesseiro-ortopedico-ideal-para-dormir-de-lado-de-costas-e-de-brucos-presente-perfeito-para-o-dia-das-maes-s-5431-s-5432ads%22%2C%22quantity%22%3A3%2C%22image%22%3A%22https%3A%5C%2F%5C%2Fnacional-brasil.store%5C%2Fwp-content%5C%2Fuploads%5C%2F2026%5C%2F06%5C%2F52d56cdd-60a5-4110-96c3-e4c079a3bd66.png%22%2C%22variant_id%22%3A%22%22%2C%22product_id%22%3A2391%7D%5D&origin=woocommerce
+X-LiteSpeed-Cache-Control: no-cache
+Cache-Control: no-cache, no-store, must-revalidate, max-age=0         
+Date: Thu, 11 Jun 2026 20:00:41 GMT
+Server: LiteSpeed
+platform: hostinger
+panel: hpanel
+Content-Security-Policy: upgrade-insecure-requests
+
+HTTP/1.1 200 OK
+Accept-Ranges: bytes
+Age: 1
+Cache-Control: public,max-age=0,must-revalidate
+Cache-Status: "Netlify Edge"; fwd=miss
+Content-Length: 46743
+Content-Type: text/html; charset=UTF-8
+Date: Thu, 11 Jun 2026 20:00:42 GMT
+Etag: "cd4d049f8a3a31a1c271d89feda5a841-ssl"
+Server: Netlify
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+X-Nf-Request-Id: 01KTW4BJEMYKW5CS1BKG7ZXQVD
+
