@@ -540,7 +540,8 @@ exports.handler = async (event, context) => {
           console.log('⚡ Iniciando integração de Pix com a RevoPay...');
           const revopayUrl = 'https://api.revopaypagamentos.com.br/v1/transactions';
           
-          const authHeader = 'Basic ' + Buffer.from(`${(REVOPAY_API_KEY || '').trim()}:${(REVOPAY_PUBLIC_KEY || '').trim()}`).toString('base64');
+          // RevoPay uses Basic Auth with Secret Key as username and 'x' as password
+          const authHeader = 'Basic ' + Buffer.from(`${(REVOPAY_API_KEY || '').trim()}:x`).toString('base64');
           const amountCents = Math.round(totalAmount * 100);
 
           const rawIp = data.customer_ip || event.headers['client-ip'] || event.headers['x-forwarded-for'] || '127.0.0.1';
