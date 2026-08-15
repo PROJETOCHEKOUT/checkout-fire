@@ -119,6 +119,8 @@ exports.handler = async (event, context) => {
     let PAGUEFLEX_API_KEY = process.env.PAGUEFLEX_API_KEY || '';
     let WAPPI_API_KEY = process.env.WAPPI_API_KEY || '';
     let WAPPI_PUBLIC_KEY = process.env.WAPPI_PUBLIC_KEY || '';
+    let REVOPAY_API_KEY = process.env.REVOPAY_API_KEY || '';
+    let REVOPAY_PUBLIC_KEY = process.env.REVOPAY_PUBLIC_KEY || '';
     let ACTIVE_GATEWAY = 'paguex';
     let THIRD_PARTY_WEBHOOK = null;
 
@@ -147,6 +149,10 @@ exports.handler = async (event, context) => {
             if (c.key === 'pagueflex_api_key' && c.value) PAGUEFLEX_API_KEY = c.value;
             if (c.key === 'wappi_api_key' && c.value) WAPPI_API_KEY = c.value;
             if (c.key === 'wappi_public_key' && c.value) WAPPI_PUBLIC_KEY = c.value;
+            if (c.key === 'revopay_api_key' && c.value) REVOPAY_API_KEY = c.value;
+            if (c.key === 'revopay_public_key' && c.value) REVOPAY_PUBLIC_KEY = c.value;
+            if (c.key === 'revopay_api_key' && c.value) REVOPAY_API_KEY = c.value;
+            if (c.key === 'revopay_public_key' && c.value) REVOPAY_PUBLIC_KEY = c.value;
             if (c.key === 'checkout_theme_config' && c.value) {
               try {
                 const tc = JSON.parse(c.value);
@@ -528,6 +534,80 @@ exports.handler = async (event, context) => {
           pixQrCode = '00020101021126950014br.gov.bcb.pix0136mock-pix-key-for-wappi-testing0233Pagamento simulado wappi52040000530398654045.005802BR5915Antigravity Mock6009Sao Paulo62070503***6304E8A2';
           pixExpiration = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
           gatewayResponse = { success: false, mode: 'fallback_error', error_details: err.message, message: 'Falha ao conectar na Wappi' };
+        }
+      } else if (ACTIVE_GATEWAY === 'revopay') {
+        try {
+          console.log('⚡ Iniciando integração de Pix com a RevoPay...');
+          const revopayUrl = 'https://api.revopaypagamentos.com.br/v1/transactions';
+          
+          const authHeader = 'Basic ' + Buffer.from(`${(REVOPAY_API_KEY || '').trim()}:${(REVOPAY_PUBLIC_KEY || '').trim()}`).toString('base64');
+          const amountCents = Math.round(totalAmount * 100);
+
+          const rawIp = data.customer_ip || event.headers['client-ip'] || event.headers['x-forwarded-for'] || '127.0.0.1';
+          const cleanIp = rawIp.split(',')[0].trim();
+
+          const docNum = data.customer_document ? data.customer_document.replace(/\D/g, '') : (data.customer_cpf ? data.customer_cpf.replace(/\D/g, '') : '00000000000');
+
+          const revopayPayload = {
+            amount: amountCents,
+            paymentMethod: 'pix',
+            customer: {
+              name: data.customer_name || 'Cliente Desconhecido',
+              email: data.customer_email || 'email@desconhecido.com',
+              phone: data.customer_phone ? data.customer_phone.replace(/\D/g, '') : '11999999999',
+              document: {
+                type: docNum.length === 14 ? 'cnpj' : 'cpf',
+                number: docNum
+              }
+            },
+            items: data.items && data.items.length > 0 ? data.items.map(item => ({
+              title: item.title || item.name || 'Produto',
+              unitPrice: Math.round(parseFloat(item.price) * 100) || amountCents,
+              quantity: parseInt(item.quantity) || 1,
+              tangible: false
+            })) : [{
+              title: shopifyOrderName || 'Pedido Genérico',
+              unitPrice: amountCents,
+              quantity: 1,
+              tangible: false
+            }],
+            postbackUrl: "https://checkoutseguro-emporiodomfire.com/api/webhook",
+            ip: cleanIp
+          };
+
+          const revopayResponse = await fetch(revopayUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': authHeader,
+              'User-Agent': 'CheckoutSeguro/1.0 (+contato@minhaloja.com.br)'
+            },
+            body: JSON.stringify(revopayPayload)
+          });
+
+          const revopayData = await revopayResponse.json();
+
+          if (!revopayResponse.ok || (revopayData.error && revopayData.error !== '')) {
+            throw new Error(`Erro API RevoPay: ${revopayData.message || JSON.stringify(revopayData)}`);
+          }
+
+          transactionId = revopayData.id;
+          transactionStatus = 'PENDING';
+          pixQrCode = revopayData.pix.qrcode;
+          
+          const expiresAt = new Date(revopayData.pix.expiresAt);
+          pixExpiration = expiresAt.getTime() > 0 ? expiresAt.toISOString() : new Date(Date.now() + 30 * 60000).toISOString();
+          
+          gatewayResponse = revopayData;
+
+        } catch (err) {
+          console.error('❌ Exceção ao conectar com a RevoPay:', err.message);
+          isMock = true;
+          transactionId = 'mock-revopay-uuid-' + Math.random().toString(36).substr(2, 9);
+          transactionStatus = 'PENDING';
+          pixQrCode = '00020101021126950014br.gov.bcb.pix0136mock-pix-key-for-revopay-testing0233Pagamento simulado revopay52040000530398654045.005802BR5915Antigravity Mock6009Sao Paulo62070503***6304E8A2';
+          pixExpiration = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          gatewayResponse = { success: false, mode: 'fallback_error', error_details: err.message, message: 'Falha ao conectar na RevoPay' };
         }
       } else if (ACTIVE_GATEWAY === 'hypercash') {
         try {

@@ -1000,6 +1000,8 @@ Fico no aguardo! \u{1F60A}`;
         const pfWebhookSecret = configData.pagueflex_webhook_secret || '';
         const waApiKey = configData.wappi_api_key || '';
         const waPubKey = configData.wappi_public_key || '';
+        const revoApiKey = configData.revopay_api_key || '';
+        const revoPubKey = configData.revopay_public_key || '';
 
         const togglePaguex = document.getElementById('toggle-paguex');
         const toggleHypercash = document.getElementById('toggle-hypercash');
@@ -1019,6 +1021,7 @@ Fico no aguardo! \u{1F60A}`;
           if (togglePaysharkV2) togglePaysharkV2.checked = (activeGateway === 'payshark_v2');
         if (togglePagueflex) togglePagueflex.checked = (activeGateway === 'pagueflex');
         if (typeof toggleWappi !== 'undefined' && toggleWappi) toggleWappi.checked = (activeGateway === 'wappi');
+        if (typeof toggleRevopay !== 'undefined' && toggleRevopay) toggleRevopay.checked = (activeGateway === 'revopay');
 
         if (cardPaguex) cardPaguex.classList.toggle('active', activeGateway === 'paguex');
         if (cardHypercash) cardHypercash.classList.toggle('active', activeGateway === 'hypercash');
@@ -1026,6 +1029,7 @@ Fico no aguardo! \u{1F60A}`;
           if (cardPaysharkV2) cardPaysharkV2.classList.toggle('active', activeGateway === 'payshark_v2');
         if (cardPagueflex) cardPagueflex.classList.toggle('active', activeGateway === 'pagueflex');
         if (typeof cardWappi !== 'undefined' && cardWappi) cardWappi.classList.toggle('active', activeGateway === 'wappi');
+        if (typeof cardRevopay !== 'undefined' && cardRevopay) cardRevopay.classList.toggle('active', activeGateway === 'revopay');
 
         const pPubKeyInput = document.getElementById('paguex-public-key');
         const pSecKeyInput = document.getElementById('paguex-secret-key');
@@ -1040,6 +1044,8 @@ Fico no aguardo! \u{1F60A}`;
         const pfWebhookSecretInput = document.getElementById('pagueflex-webhook-secret');
         const wappiApiKeyInput = document.getElementById('wappi-api-key');
         const wappiPublicKeyInput = document.getElementById('wappi-public-key');
+        const revopayApiKeyInput = document.getElementById('revopay-api-key');
+        const revopayPublicKeyInput = document.getElementById('revopay-public-key');
 
         if (pPubKeyInput) pPubKeyInput.value = pPublic;
         if (pSecKeyInput) pSecKeyInput.value = pSecret;
@@ -1054,6 +1060,8 @@ Fico no aguardo! \u{1F60A}`;
         if (pfWebhookSecretInput) pfWebhookSecretInput.value = pfWebhookSecret;
         if (wappiApiKeyInput) wappiApiKeyInput.value = waApiKey;
         if (wappiPublicKeyInput) wappiPublicKeyInput.value = waPubKey;
+        if (revopayApiKeyInput) revopayApiKeyInput.value = revoApiKey;
+        if (revopayPublicKeyInput) revopayPublicKeyInput.value = revoPubKey;
 
         // Se a tabela estiver faltando, exibe aviso amigável
         if (configData.table_missing) {
@@ -5586,12 +5594,14 @@ Fico no aguardo! \u{1F60A}`;
   const togglePaysharkV2 = document.getElementById('toggle-payshark_v2');
   const togglePagueflex = document.getElementById('toggle-pagueflex');
   const toggleWappi = document.getElementById('toggle-wappi');
+  const toggleRevopay = document.getElementById('toggle-revopay');
   const cardPaguex = document.getElementById('card-paguex');
   const cardHypercash = document.getElementById('card-hypercash');
   const cardPayshark = document.getElementById('card-payshark');
   const cardPaysharkV2 = document.getElementById('card-payshark_v2');
   const cardPagueflex = document.getElementById('card-pagueflex');
   const cardWappi = document.getElementById('card-wappi');
+  const cardRevopay = document.getElementById('card-revopay');
   const pPubKeyInput = document.getElementById('paguex-public-key');
   const pSecKeyInput = document.getElementById('paguex-secret-key');
   const hPubKeyInput = document.getElementById('hypercash-public-key');
@@ -5605,6 +5615,8 @@ Fico no aguardo! \u{1F60A}`;
   const pfWebhookSecretInput = document.getElementById('pagueflex-webhook-secret');
   const wappiApiKeyInput = document.getElementById('wappi-api-key');
   const wappiPublicKeyInput = document.getElementById('wappi-public-key');
+  const revopayApiKeyInput = document.getElementById('revopay-api-key');
+  const revopayPublicKeyInput = document.getElementById('revopay-public-key');
   const btnSaveIntegracoes = document.getElementById('btn-save-integracoes');
 
   const updateGatewayToggles = (selected) => {
@@ -5614,6 +5626,7 @@ Fico no aguardo! \u{1F60A}`;
       if (togglePaysharkV2) togglePaysharkV2.checked = (selected === 'payshark_v2');
     if (togglePagueflex) togglePagueflex.checked = (selected === 'pagueflex');
     if (toggleWappi) toggleWappi.checked = (selected === 'wappi');
+    if (toggleRevopay) toggleRevopay.checked = (selected === 'revopay');
     
     if (cardPaguex) cardPaguex.classList.toggle('active', selected === 'paguex');
     if (cardHypercash) cardHypercash.classList.toggle('active', selected === 'hypercash');
@@ -5621,6 +5634,7 @@ Fico no aguardo! \u{1F60A}`;
       if (cardPaysharkV2) cardPaysharkV2.classList.toggle('active', selected === 'payshark_v2');
     if (cardPagueflex) cardPagueflex.classList.toggle('active', selected === 'pagueflex');
     if (cardWappi) cardWappi.classList.toggle('active', selected === 'wappi');
+    if (cardRevopay) cardRevopay.classList.toggle('active', selected === 'revopay');
   };
 
   if (togglePaguex) togglePaguex.addEventListener('change', () => { if(togglePaguex.checked) updateGatewayToggles('paguex'); else updateGatewayToggles(''); });
@@ -5629,6 +5643,7 @@ Fico no aguardo! \u{1F60A}`;
     if (togglePaysharkV2) togglePaysharkV2.addEventListener('change', () => { if(togglePaysharkV2.checked) updateGatewayToggles('payshark_v2'); else updateGatewayToggles(''); });
   if (togglePagueflex) togglePagueflex.addEventListener('change', () => { if(togglePagueflex.checked) updateGatewayToggles('pagueflex'); else updateGatewayToggles(''); });
   if (toggleWappi) toggleWappi.addEventListener('change', () => { if(toggleWappi.checked) updateGatewayToggles('wappi'); else updateGatewayToggles(''); });
+  if (toggleRevopay) toggleRevopay.addEventListener('change', () => { if(toggleRevopay.checked) updateGatewayToggles('revopay'); else updateGatewayToggles(''); });
 
   if (btnSaveIntegracoes) {
     btnSaveIntegracoes.addEventListener('click', async () => {
@@ -5639,6 +5654,7 @@ Fico no aguardo! \u{1F60A}`;
         if (togglePaysharkV2 && togglePaysharkV2.checked) activeGateway = 'payshark_v2';
       if (togglePagueflex && togglePagueflex.checked) activeGateway = 'pagueflex';
       if (toggleWappi && toggleWappi.checked) activeGateway = 'wappi';
+      if (toggleRevopay && toggleRevopay.checked) activeGateway = 'revopay';
 
       const pPublic = pPubKeyInput ? pPubKeyInput.value.trim() : '';
       const pSecret = pSecKeyInput ? pSecKeyInput.value.trim() : '';
@@ -5653,6 +5669,8 @@ Fico no aguardo! \u{1F60A}`;
       const pfWebhookSecret = pfWebhookSecretInput ? pfWebhookSecretInput.value.trim() : '';
       const wappiApi = wappiApiKeyInput ? wappiApiKeyInput.value.trim() : '';
       const wappiPublic = wappiPublicKeyInput ? wappiPublicKeyInput.value.trim() : '';
+      const revopayApi = revopayApiKeyInput ? revopayApiKeyInput.value.trim() : '';
+      const revopayPublic = revopayPublicKeyInput ? revopayPublicKeyInput.value.trim() : '';
 
       btnSaveIntegracoes.disabled = true;
       btnSaveIntegracoes.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Salvando...</span>`;
@@ -5675,7 +5693,9 @@ Fico no aguardo! \u{1F60A}`;
             pagueflex_transfer_key: pfTransferKey,
             pagueflex_webhook_secret: pfWebhookSecret,
             wappi_api_key: wappiApi,
-            wappi_public_key: wappiPublic
+            wappi_public_key: wappiPublic,
+            revopay_api_key: revopayApi,
+            revopay_public_key: revopayPublic
           })
         });
 
