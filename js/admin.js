@@ -880,8 +880,8 @@ Fico no aguardo! \u{1F60A}`;
       // 1. Carregar Configurações Globais e Pedidos PARALELAMENTE para ficar muito mais rápido
       const [configRes, ordersRes, thirdPartyRes] = await Promise.all([
         fetch('/api/config'),
-        fetch('/api/orders?limit=100'),
-        fetch('/api/orders?limit=100&third_party=true')
+        fetch('/api/orders?limit=5000'),
+        fetch('/api/orders?limit=5000&third_party=true')
       ]);
 
       // --- PROCESSAR CONFIGURAÇÕES ---
@@ -1108,8 +1108,8 @@ Fico no aguardo! \u{1F60A}`;
   async function fetchOrdersSilently() {
     try {
       const [ordersRes, thirdPartyRes] = await Promise.all([
-        fetch('/api/orders?limit=100'),
-        fetch('/api/orders?limit=100&third_party=true')
+        fetch('/api/orders?limit=5000'),
+        fetch('/api/orders?limit=5000&third_party=true')
       ]);
 
       if (ordersRes.ok && thirdPartyRes.ok) {
